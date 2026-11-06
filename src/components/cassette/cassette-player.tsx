@@ -262,11 +262,11 @@ export class CassettePlayer extends React.Component<Record<string, never>, Playe
           if (sinceRotate > 120) {
             omega = omega * Math.max(0, 1 - (sinceRotate - 120) / 400);
           }
-          // 增益 8 倍，让快速拖拽能到 64 倍速
+          // 增益 8 倍，让快速拖拽能到 maxRate 倍速
           const rate = clamp(
             (Math.abs(omega) / NORMAL_OMEGA) * 8,
             0.0625,
-            DRAG_MAX_RATE
+            this.state.maxRate
           );
           eng.setRate(rate);
           this.updateUI(eng.currentTime, rate);
@@ -277,7 +277,7 @@ export class CassettePlayer extends React.Component<Record<string, never>, Playe
           if (sinceRotate > 120) {
             rewindSpeed *= Math.max(0, 1 - (sinceRotate - 120) / 400);
           }
-          rewindSpeed = clamp(rewindSpeed, 0.0625, DRAG_REWIND_MAX_RATE);
+          rewindSpeed = clamp(rewindSpeed, 0.0625, this.state.maxRate);
           eng.setRate(rewindSpeed);
           if (!eng.isPlaying) eng.play();
           this.updateUI(eng.currentTime, -rewindSpeed);

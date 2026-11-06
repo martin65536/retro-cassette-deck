@@ -92,8 +92,11 @@ class TapeProcessor extends AudioWorkletProcessor {
 
     const dataCh = Math.min(numCh, this.channelData.length);
     const rate = this.smoothedRate;
-    const vol = this.volume;
     const sr = this.sampleRate || 44100;
+
+    // 响度随速度指数衰减：vol * (1/rate)^0.5 = vol / sqrt(rate)
+    // rate=1 时满音量，rate=10 时约 0.32，rate=20 时约 0.22
+    const speedVolume = this.volume / Math.sqrt(Math.max(1, rate));
 
     // 计算低通滤波器系数
     // effectiveSampleRate=0 时自动：根据 rate 降低截止频率
@@ -137,7 +140,7 @@ class TapeProcessor extends AudioWorkletProcessor {
           sample = this.processSample(sample, c, a);
         }
 
-        output[c][i] = sample * vol;
+        output[c][i] = sample * speedVolume;
       }
       for (let c = dataCh; c < numCh; c++) {
         output[c][i] = 0;
