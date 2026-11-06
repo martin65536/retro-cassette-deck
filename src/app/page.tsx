@@ -31,7 +31,7 @@ export default function Home() {
       {/* Header */}
       <header className="relative z-10 pt-8 sm:pt-12 pb-2 px-4 text-center">
         <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-amber-700/40 bg-amber-950/40 mb-4">
-          <span className="w-1.5 h-1.5 rounded-full bg-orange-500 animate-pulse" />
+          <span className="w-1.5 h-1.5 rounded-full bg-orange-500" />
           <span className="text-[10px] tracking-[0.25em] font-mono text-amber-300/90">
             ANALOG · 1979
           </span>
@@ -52,7 +52,7 @@ export default function Home() {
       </main>
 
       {/* Footer（sticky bottom） */}
-      <footer className="relative z-10 mt-auto border-t border-amber-900/30 bg-stone-950/60 backdrop-blur">
+      <footer className="relative z-10 mt-auto border-t border-amber-900/30 bg-stone-950/80">
         <div className="max-w-3xl mx-auto px-4 py-4 flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-stone-500">
           <p className="font-mono">
             RETRO CASSETTE DECK · Web Audio API 实时合成音效

@@ -4,13 +4,12 @@
  * 磁带音频引擎（Web Audio API 实现）
  *
  * 核心思想：用 AudioBufferSourceNode 模拟"磁针读取磁带"
- * - 音频预先 decode 成 AudioBuffer
- * - source 持续播放，通过 playbackRate（AudioParam）连续控制速度与音高
+ * - 音频预先 decode 成 AudioBuffer，并预生成反转副本
+ * - 正放：用原 buffer，playhead 从 offset 正向推进
+ * - 倒放：用反转 buffer，offset = duration - playhead，正向播放 = 反向听
+ *   （AudioBufferSourceNode 不支持负 playbackRate，故用反转 buffer 模拟）
  * - playbackRate 每帧平滑过渡 → 音调连续滑动（非阶跃）
- * - 播放位置 playhead 完全由引擎掌控，可正向推进、可倒退
- * - 倒带：stop source + 手动倒退 playhead + 卷带音效（真实磁带行为）
- *
- * 所有音频（含网易云，经后端代理同源）均 fetch + decode 成 AudioBuffer
+ * - 倒带时能听到真实的反向音频，像磁带倒带一样
  */
 
 export interface AudioEngineCallbacks {
@@ -28,17 +27,18 @@ const clamp = (v: number, lo: number, hi: number) =>
 export class TapeAudioEngine {
   private ctx: AudioContext | null = null;
   private buffer: AudioBuffer | null = null;
+  private reverseBuffer: AudioBuffer | null = null;
   private source: AudioBufferSourceNode | null = null;
   private gain: GainNode | null = null;
 
   private playhead = 0;
   private playing = false;
+  private reverse = false; // 当前是否倒放模式
   private targetRate = 1;
   private smoothedRate = 1;
   private volume = 0.85;
   private cb: AudioEngineCallbacks;
 
-  // 性能：缓存 duration
   private cachedDuration = 0;
 
   constructor(cb: AudioEngineCallbacks = {}) {
@@ -83,14 +83,33 @@ export class TapeAudioEngine {
     return false;
   }
 
+  /** 生成反转 AudioBuffer（逐声道反转样本） */
+  private createReverseBuffer(src: AudioBuffer): AudioBuffer {
+    const ctx = this.ctx!;
+    const channels = src.numberOfChannels;
+    const len = src.length;
+    const rev = ctx.createBuffer(channels, len, src.sampleRate);
+    for (let c = 0; c < channels; c++) {
+      const srcData = src.getChannelData(c);
+      const dstData = rev.getChannelData(c);
+      for (let i = 0; i < len; i++) {
+        dstData[i] = srcData[len - 1 - i];
+      }
+    }
+    return rev;
+  }
+
   /**
-   * 加载音频：fetch + decodeAudioData（所有 URL 均同源或经代理）
+   * 加载音频：fetch + decodeAudioData
+   * 同步生成反转 buffer（用于倒放）
    */
   async load(url: string): Promise<void> {
     this.ensureCtx();
     this.stopSource();
     this.buffer = null;
+    this.reverseBuffer = null;
     this.playhead = 0;
+    this.reverse = false;
     this.smoothedRate = 1;
     this.targetRate = 1;
     this.cachedDuration = 0;
@@ -101,9 +120,10 @@ export class TapeAudioEngine {
         throw new Error(`HTTP ${res.status}`);
       }
       const arr = await res.arrayBuffer();
-      // decodeAudioData 可能返回 Promise 或用回调（旧 Safari），这里用 Promise 形式
       this.buffer = await this.ctx!.decodeAudioData(arr);
       this.cachedDuration = this.buffer.duration;
+      // 预生成反转 buffer（倒放用）
+      this.reverseBuffer = this.createReverseBuffer(this.buffer);
       this.cb.onLoaded?.(this.buffer.duration);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -122,23 +142,43 @@ export class TapeAudioEngine {
   }
 
   private startSource() {
-    if (!this.buffer || !this.ctx || !this.gain) return;
+    if (!this.buffer || !this.reverseBuffer || !this.ctx || !this.gain) return;
     this.stopSource();
     this.source = this.ctx.createBufferSource();
-    this.source.buffer = this.buffer;
+    // 倒放模式用反转 buffer
+    this.source.buffer = this.reverse ? this.reverseBuffer : this.buffer;
     this.source.connect(this.gain);
     this.source.playbackRate.value = this.smoothedRate;
     this.source.onended = () => {
-      // 自然播完（非主动 stop）
       if (this.playing) {
-        this.playing = false;
-        this.playhead = 0;
-        this.smoothedRate = 1;
-        this.targetRate = 1;
-        this.cb.onEnded?.();
+        // 倒放到头（反转 buffer 播完 = 正向 playhead 到 0）
+        if (this.reverse) {
+          this.playing = false;
+          this.playhead = 0;
+          this.smoothedRate = 1;
+          this.targetRate = 1;
+          this.cb.onEnded?.();
+        } else {
+          // 正放到尾
+          this.playing = false;
+          this.playhead = 0;
+          this.smoothedRate = 1;
+          this.targetRate = 1;
+          this.cb.onEnded?.();
+        }
       }
     };
-    const offset = clamp(this.playhead, 0, this.cachedDuration - 0.02);
+    // 计算偏移：倒放时 offset = duration - playhead
+    let offset: number;
+    if (this.reverse) {
+      offset = clamp(
+        this.cachedDuration - this.playhead,
+        0,
+        this.cachedDuration - 0.02
+      );
+    } else {
+      offset = clamp(this.playhead, 0, this.cachedDuration - 0.02);
+    }
     try {
       this.source.start(0, offset);
       this.playing = true;
@@ -174,12 +214,26 @@ export class TapeAudioEngine {
     this.setPlayhead(0);
   }
 
-  /** 直接设置播放位置（不重启 source，倒带每帧调用） */
+  /** 切换正放/倒放模式（倒带时调用） */
+  setReverse(reverse: boolean) {
+    if (this.reverse === reverse) return;
+    this.reverse = reverse;
+    // 切换需要重启 source（换 buffer）
+    if (this.playing) {
+      this.startSource();
+    }
+  }
+
+  get isReverse() {
+    return this.reverse;
+  }
+
+  /** 直接设置播放位置（倒带每帧用，倒放时 playhead 递减） */
   setPlayhead(time: number) {
     this.playhead = clamp(time, 0, this.cachedDuration > 0 ? this.cachedDuration : 0);
   }
 
-  /** seek：重启 source 到目标位置（拖动进度条用） */
+  /** seek：重启 source 到目标位置 */
   seek(time: number) {
     const wasPlaying = this.playing;
     this.stopSource();
@@ -187,7 +241,7 @@ export class TapeAudioEngine {
     if (wasPlaying) this.startSource();
   }
 
-  /** 设置目标倍速（平滑过渡由 tick 处理） */
+  /** 设置目标倍速 */
   setRate(rate: number) {
     this.targetRate = clamp(rate, MIN_RATE, MAX_RATE);
   }
@@ -205,24 +259,35 @@ export class TapeAudioEngine {
 
   /**
    * 每帧调用（rAF）
-   * - 平滑 playbackRate（连续变调的关键）
-   * - 推进 playhead
+   * - 平滑 playbackRate
+   * - 推进 playhead（倒放时递减）
    */
   tick(dt: number) {
-    // 平滑 rate（指数移动平均），让音调连续滑动
     const smoothFactor = Math.min(1, dt * 18);
     this.smoothedRate +=
       (this.targetRate - this.smoothedRate) * smoothFactor;
 
     if (this.playing && this.source) {
       this.source.playbackRate.value = this.smoothedRate;
-      this.playhead += dt * this.smoothedRate;
-      if (this.playhead >= this.cachedDuration) {
-        this.playhead = 0;
-        this.stopSource();
-        this.smoothedRate = 1;
-        this.targetRate = 1;
-        this.cb.onEnded?.();
+      // 倒放模式：playhead 递减；正放：递增
+      if (this.reverse) {
+        this.playhead -= dt * this.smoothedRate;
+        if (this.playhead <= 0) {
+          this.playhead = 0;
+          this.stopSource();
+          this.smoothedRate = 1;
+          this.targetRate = 1;
+          this.cb.onEnded?.();
+        }
+      } else {
+        this.playhead += dt * this.smoothedRate;
+        if (this.playhead >= this.cachedDuration) {
+          this.playhead = 0;
+          this.stopSource();
+          this.smoothedRate = 1;
+          this.targetRate = 1;
+          this.cb.onEnded?.();
+        }
       }
     }
   }

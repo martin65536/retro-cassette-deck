@@ -266,6 +266,8 @@ export class CassettePlayer extends React.Component<Record<string, never>, Playe
         // ===== 拖拽模式 =====
         const sinceRotate = now - ds.lastRotateTime;
         if (ds.direction === "forward") {
+          // 顺时针：确保正放，rate 跟随角速度（连续变调）
+          eng.setReverse(false);
           let omega = ds.omega;
           if (sinceRotate > 120) {
             omega = omega * Math.max(0, 1 - (sinceRotate - 120) / 400);
@@ -279,15 +281,16 @@ export class CassettePlayer extends React.Component<Record<string, never>, Playe
           this.updateUI(eng.currentTime, rate);
           if (!eng.isPlaying) eng.play();
         } else if (ds.direction === "backward") {
-          if (eng.isPlaying) eng.pause();
+          // 逆时针：切到反转 buffer 实时倒放（听到真实反向音频）
+          eng.setReverse(true);
           let rewindSpeed = Math.abs(ds.omega) * 1.2;
           if (sinceRotate > 120) {
             rewindSpeed *= Math.max(0, 1 - (sinceRotate - 120) / 400);
           }
-          rewindSpeed = clamp(rewindSpeed, 0, 12);
-          const newTime = eng.currentTime - rewindSpeed * dt;
-          eng.setPlayhead(newTime);
-          this.updateUI(eng.currentTime, 0);
+          rewindSpeed = clamp(rewindSpeed, 0.0625, 6);
+          eng.setRate(rewindSpeed);
+          if (!eng.isPlaying) eng.play();
+          this.updateUI(eng.currentTime, -rewindSpeed);
         } else {
           eng.setRate(0.0625);
           this.updateUI(eng.currentTime, 0.0625);
@@ -309,17 +312,21 @@ export class CassettePlayer extends React.Component<Record<string, never>, Playe
         // ===== 非拖拽：正常播放 / 快进快退 =====
         if (this.winding && eng && this.hasTape) {
           if (this.winding === "forward") {
+            // 快进：正放，高速变调
+            eng.setReverse(false);
             eng.setRate(FF_RATE);
             if (!eng.isPlaying) eng.play();
             this.updateUI(eng.currentTime, FF_RATE);
           } else {
-            if (eng.isPlaying) eng.pause();
-            const newTime = eng.currentTime - WIND_REWIND_SPEED * dt;
-            eng.setPlayhead(newTime);
-            this.updateUI(eng.currentTime, 0);
+            // 快退：切反转 buffer，实时倒放
+            eng.setReverse(true);
+            eng.setRate(WIND_REWIND_SPEED);
+            if (!eng.isPlaying) eng.play();
+            this.updateUI(eng.currentTime, -WIND_REWIND_SPEED);
             if (eng.currentTime <= 0.05) this.stopWinding();
           }
         } else if (this.playing && eng) {
+          eng.setReverse(false);
           eng.setRate(1);
           this.updateUI(eng.currentTime, 1);
         }
@@ -387,11 +394,13 @@ export class CassettePlayer extends React.Component<Record<string, never>, Playe
         const label =
           rate === 0
             ? "—"
-            : rate < 0.95
-              ? `${rate.toFixed(2)}× ↓`
-              : rate > 1.05
-                ? `${rate.toFixed(2)}× ↑`
-                : "1.00×";
+            : rate < 0
+              ? `${Math.abs(rate).toFixed(2)}× ◀◀` // 倒放
+              : rate < 0.95
+                ? `${rate.toFixed(2)}× ↓`
+                : rate > 1.05
+                  ? `${rate.toFixed(2)}× ↑`
+                  : "1.00×";
         this.rateBadge.textContent = label;
       }
     }
@@ -481,6 +490,8 @@ export class CassettePlayer extends React.Component<Record<string, never>, Playe
     const wasForward = this.winding === "forward";
     this.setState({ winding: null });
     this.winding = null;
+    // 恢复正放模式
+    this.audio.setReverse(false);
     this.audio.setRate(1);
     if (this.soundsOn) {
       const sEng = this.ensureSounds();
@@ -492,11 +503,17 @@ export class CassettePlayer extends React.Component<Record<string, never>, Playe
     if (!wasForward) {
       this.setState({ playing: false });
       this.playing = false;
+      // 快退停止后刷新 badge 为停止状态
+      this.updateUI(this.audio.currentTime, 0);
+    } else {
+      // 快进停止后保持播放，刷新 badge 为 1.00×
+      this.updateUI(this.audio.currentTime, 1);
     }
   };
 
   private eject = () => {
     this.audio.pause();
+    this.audio.setReverse(false);
     this.audio.setRate(1);
     this.setState({ playing: false, winding: null, duration: 0, track: null });
     this.playing = false;
@@ -542,6 +559,8 @@ export class CassettePlayer extends React.Component<Record<string, never>, Playe
     const wasPlaying = this.dragState.wasPlaying;
     this.dragState.active = false;
     this.dragState.direction = "none";
+    // 拖拽结束恢复正放模式
+    this.audio.setReverse(false);
     this.audio.setRate(1);
     if (this.soundsOn) {
       const sEng = this.ensureSounds();
@@ -554,6 +573,7 @@ export class CassettePlayer extends React.Component<Record<string, never>, Playe
       this.audio.play();
       this.setState({ playing: true });
       this.playing = true;
+      this.ensureRAF();
       if (this.soundsOn) {
         const sEng = this.ensureSounds();
         if (sEng) sEng.setHiss(true);
@@ -613,6 +633,8 @@ export class CassettePlayer extends React.Component<Record<string, never>, Playe
       if (eng) eng.eject();
     }
     this.audio.pause();
+    this.audio.setReverse(false);
+    this.audio.setRate(1);
     this.setState({
       playing: false,
       winding: null,
@@ -850,7 +872,7 @@ export class CassettePlayer extends React.Component<Record<string, never>, Playe
         </div>
 
         {/* 音频源加载 */}
-        <div className="mt-4 p-4 rounded-2xl bg-amber-50/80 dark:bg-stone-900/70 border border-amber-700/40 dark:border-stone-700/60 backdrop-blur">
+        <div className="mt-4 p-4 rounded-2xl bg-amber-50/90 dark:bg-stone-900/70 border border-amber-700/40 dark:border-stone-700/60">
           <div className="flex items-center gap-2 mb-3">
             <div className="h-4 w-1 bg-orange-600 rounded-full" />
             <h3 className="text-sm font-semibold text-amber-900 dark:text-stone-200">
