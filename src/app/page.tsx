@@ -53,7 +53,7 @@ export default function Home() {
       >
         <div className="max-w-3xl mx-auto px-6 py-4 flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-stone-500">
           <p className="font-mono">Web Audio API 实时合成 · Canvas 渲染</p>
-          <p className="font-mono">带卷可拖拽 · 实时倒放 · ×15 倍速</p>
+          <p className="font-mono">带卷可拖拽 · 实时倒放 · 采样模式无限倍速</p>
         </div>
       </footer>
     </div>

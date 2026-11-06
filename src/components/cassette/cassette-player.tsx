@@ -23,13 +23,13 @@ import { Button } from "@/components/ui/button";
 const PLAY_DEG_PER_SEC = 80;
 // 真实磁带机快进/快退带卷转速（很快）
 const WIND_DEG_PER_SEC = 1400;
-// 快进/快退音频倍速（真实磁带约 ×15）
-const FF_RATE = 15;
-const REWIND_RATE = 15;
+// 快进/快退音频倍速（AudioWorklet 采样模式，无上限）
+const FF_RATE = 30;
+const REWIND_RATE = 30;
 const NORMAL_OMEGA = (PLAY_DEG_PER_SEC * Math.PI) / 180;
-// 拖拽倍速上限（Web Audio playbackRate 实际支持到 ~16-32）
-const DRAG_MAX_RATE = 16;
-const DRAG_REWIND_MAX_RATE = 12;
+// 拖拽倍速上限（采样模式无浏览器限制）
+const DRAG_MAX_RATE = 64;
+const DRAG_REWIND_MAX_RATE = 48;
 
 function formatTime(s: number): string {
   if (!isFinite(s) || s < 0) s = 0;
@@ -251,9 +251,9 @@ export class CassettePlayer extends React.Component<Record<string, never>, Playe
           if (sinceRotate > 120) {
             omega = omega * Math.max(0, 1 - (sinceRotate - 120) / 400);
           }
-          // 增益 3 倍，让中等手速就能达到高倍速
+          // 增益 8 倍，让快速拖拽能到 64 倍速
           const rate = clamp(
-            (Math.abs(omega) / NORMAL_OMEGA) * 3,
+            (Math.abs(omega) / NORMAL_OMEGA) * 8,
             0.0625,
             DRAG_MAX_RATE
           );
