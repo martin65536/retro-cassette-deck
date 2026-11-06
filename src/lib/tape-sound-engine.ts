@@ -1,27 +1,26 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef } from "react";
-
 /**
- * 磁带音效合成引擎
+ * 磁带音效合成引擎（纯类，无 React 依赖）
  * 使用 Web Audio API 实时合成磁带机械音效：
  * - 持续的磁带摩擦声 (hiss) —— 播放时低音量白噪声
  * - 快进/快退的快速卷带声 (wind) —— 带通滤波白噪声，频率随速度变化
  * - 机械按键声 (click) —— 短促的带通噪声脉冲
  * - 刹车停止声 (brake) —— 低频脉冲 + 噪声衰减
  * - 磁带装载/弹出声 (load/eject) —— 连续咔哒 + 滑动声
+ *
+ * 生命周期：组件 new 一个实例，卸载时调 dispose()。
+ * sfxVolume=0 时自动休眠持续源（hiss/wind），>0 时唤醒。
  */
-class TapeSoundEngine {
+export class TapeSoundEngine {
   private ctx: AudioContext | null = null;
   private masterGain: GainNode | null = null;
   private noiseBuffer: AudioBuffer | null = null;
 
-  // 持续的摩擦声
   private hissSource: AudioBufferSourceNode | null = null;
   private hissGain: GainNode | null = null;
   private hissFilter: BiquadFilterNode | null = null;
 
-  // 快进/快退的卷带声
   private windSource: AudioBufferSourceNode | null = null;
   private windGain: GainNode | null = null;
   private windFilter: BiquadFilterNode | null = null;
@@ -29,7 +28,8 @@ class TapeSoundEngine {
   private windLfoGain: GainNode | null = null;
 
   private started = false;
-  private sourcesActive = false; // 持续源（hiss/wind）是否在运行
+  private sourcesActive = false;
+  private sfxVolume = 0.6;
 
   /** 必须在用户交互后调用，以解锁 AudioContext */
   init() {
@@ -42,10 +42,8 @@ class TapeSoundEngine {
     this.masterGain = this.ctx.createGain();
     this.masterGain.gain.value = this.sfxVolume;
     this.masterGain.connect(this.ctx.destination);
-
     this.noiseBuffer = this.createNoiseBuffer();
     this.started = true;
-    // 仅当音量 >0 时才启动持续源
     if (this.sfxVolume > 0) this.startContinuousSources();
   }
 
@@ -55,8 +53,7 @@ class TapeSoundEngine {
 
   private createNoiseBuffer(): AudioBuffer {
     const ctx = this.ctx!;
-    const seconds = 2;
-    const size = ctx.sampleRate * seconds;
+    const size = ctx.sampleRate * 2;
     const buffer = ctx.createBuffer(1, size, ctx.sampleRate);
     const data = buffer.getChannelData(0);
     for (let i = 0; i < size; i++) {
@@ -70,15 +67,12 @@ class TapeSoundEngine {
     this.hissSource = ctx.createBufferSource();
     this.hissSource.buffer = this.noiseBuffer;
     this.hissSource.loop = true;
-
     this.hissFilter = ctx.createBiquadFilter();
     this.hissFilter.type = "lowpass";
     this.hissFilter.frequency.value = 3200;
     this.hissFilter.Q.value = 0.4;
-
     this.hissGain = ctx.createGain();
     this.hissGain.gain.value = 0;
-
     this.hissSource.connect(this.hissFilter);
     this.hissFilter.connect(this.hissGain);
     this.hissGain.connect(this.masterGain!);
@@ -90,13 +84,10 @@ class TapeSoundEngine {
     this.windSource = ctx.createBufferSource();
     this.windSource.buffer = this.noiseBuffer;
     this.windSource.loop = true;
-
     this.windFilter = ctx.createBiquadFilter();
     this.windFilter.type = "bandpass";
     this.windFilter.frequency.value = 2200;
     this.windFilter.Q.value = 1.2;
-
-    // 用 LFO 调制滤波频率，模拟卷带"呜呜"声
     this.windLfo = ctx.createOscillator();
     this.windLfo.type = "sine";
     this.windLfo.frequency.value = 8;
@@ -104,10 +95,8 @@ class TapeSoundEngine {
     this.windLfoGain.gain.value = 600;
     this.windLfo.connect(this.windLfoGain);
     this.windLfoGain.connect(this.windFilter.frequency);
-
     this.windGain = ctx.createGain();
     this.windGain.gain.value = 0;
-
     this.windSource.connect(this.windFilter);
     this.windFilter.connect(this.windGain);
     this.windGain.connect(this.masterGain!);
@@ -115,7 +104,6 @@ class TapeSoundEngine {
     this.windLfo.start();
   }
 
-  /** 启动持续源（hiss + wind） */
   private startContinuousSources() {
     if (!this.ctx || this.sourcesActive) return;
     this.setupHiss();
@@ -123,7 +111,6 @@ class TapeSoundEngine {
     this.sourcesActive = true;
   }
 
-  /** 停止持续源（释放 CPU，sfxVolume=0 时调用） */
   private stopContinuousSources() {
     if (!this.sourcesActive) return;
     try { this.hissSource?.stop(); } catch { /* ignore */ }
@@ -143,7 +130,6 @@ class TapeSoundEngine {
     this.sourcesActive = false;
   }
 
-  /** 设置摩擦声 (播放时为 true) */
   setHiss(active: boolean, volume = 0.05) {
     if (!this.sourcesActive || !this.ctx || !this.hissGain) return;
     const now = this.ctx.currentTime;
@@ -151,11 +137,6 @@ class TapeSoundEngine {
     this.hissGain.gain.setTargetAtTime(active ? volume : 0, now, 0.08);
   }
 
-  /**
-   * 设置卷带声
-   * @param speed 0~1，0 为停止，1 为最快
-   * @param forward 是否正向（快进/快退音色略不同）
-   */
   setWind(speed: number, forward: boolean) {
     if (!this.sourcesActive || !this.ctx || !this.windGain || !this.windFilter || !this.windLfo)
       return;
@@ -163,38 +144,25 @@ class TapeSoundEngine {
     const s = Math.max(0, Math.min(1, speed));
     this.windGain.gain.cancelScheduledValues(now);
     this.windGain.gain.setTargetAtTime(s * 0.16, now, 0.06);
-    this.windFilter.frequency.setTargetAtTime(
-      1400 + s * 3600,
-      now,
-      0.08
-    );
-    // 快退时 LFO 稍慢，模拟反向转动
-    this.windLfo.frequency.setTargetAtTime(
-      forward ? 7 + s * 6 : 5 + s * 4,
-      now,
-      0.1
-    );
+    this.windFilter.frequency.setTargetAtTime(1400 + s * 3600, now, 0.08);
+    this.windLfo.frequency.setTargetAtTime(forward ? 7 + s * 6 : 5 + s * 4, now, 0.1);
   }
 
-  /** 机械按键声 */
   click(intensity = 1) {
     if (!this.ctx || !this.noiseBuffer) return;
     const now = this.ctx.currentTime;
     const src = this.ctx.createBufferSource();
     src.buffer = this.noiseBuffer;
     src.loop = false;
-
     const filter = this.ctx.createBiquadFilter();
     filter.type = "bandpass";
     filter.frequency.value = 1100;
     filter.Q.value = 1.5;
-
     const gain = this.ctx.createGain();
     const peak = 0.28 * intensity;
     gain.gain.setValueAtTime(0, now);
     gain.gain.linearRampToValueAtTime(peak, now + 0.004);
     gain.gain.exponentialRampToValueAtTime(0.0008, now + 0.09);
-
     src.connect(filter);
     filter.connect(gain);
     gain.connect(this.masterGain!);
@@ -202,11 +170,9 @@ class TapeSoundEngine {
     src.stop(now + 0.14);
   }
 
-  /** 刹车停止声 */
   brake() {
     if (!this.ctx || !this.noiseBuffer) return;
     const now = this.ctx.currentTime;
-    // 低频脉冲
     const osc = this.ctx.createOscillator();
     osc.type = "sine";
     osc.frequency.setValueAtTime(180, now);
@@ -219,8 +185,6 @@ class TapeSoundEngine {
     oscGain.connect(this.masterGain!);
     osc.start(now);
     osc.stop(now + 0.25);
-
-    // 噪声衰减
     const src = this.ctx.createBufferSource();
     src.buffer = this.noiseBuffer;
     const filter = this.ctx.createBiquadFilter();
@@ -236,11 +200,9 @@ class TapeSoundEngine {
     src.stop(now + 0.24);
   }
 
-  /** 磁带装载声（插入磁带的机械声） */
   load() {
     if (!this.ctx || !this.noiseBuffer) return;
     const now = this.ctx.currentTime;
-    // 一连串短促咔哒声 + 滑入声
     const clicks = [0, 0.06, 0.13, 0.22, 0.3];
     clicks.forEach((t, i) => {
       const src = this.ctx!.createBufferSource();
@@ -259,7 +221,6 @@ class TapeSoundEngine {
       src.start(now + t, 0, 0.08);
       src.stop(now + t + 0.1);
     });
-    // 滑入的摩擦声
     const slide = this.ctx.createBufferSource();
     slide.buffer = this.noiseBuffer;
     const slideFilter = this.ctx.createBiquadFilter();
@@ -277,11 +238,9 @@ class TapeSoundEngine {
     slide.stop(now + 0.66);
   }
 
-  /** 磁带弹出声 */
   eject() {
     if (!this.ctx || !this.noiseBuffer) return;
     const now = this.ctx.currentTime;
-    // 弹出的滑动声 + 咔哒
     const slide = this.ctx.createBufferSource();
     slide.buffer = this.noiseBuffer;
     const slideFilter = this.ctx.createBiquadFilter();
@@ -296,8 +255,6 @@ class TapeSoundEngine {
     slideGain.connect(this.masterGain!);
     slide.start(now, 0, 0.3);
     slide.stop(now + 0.32);
-
-    // 弹出的咔哒
     const click = this.ctx.createBufferSource();
     click.buffer = this.noiseBuffer;
     const clickFilter = this.ctx.createBiquadFilter();
@@ -315,28 +272,14 @@ class TapeSoundEngine {
     click.stop(now + 0.36);
   }
 
-  setMasterVolume(v: number) {
-    if (!this.ctx || !this.masterGain) return;
-    this.masterGain.gain.setTargetAtTime(v, this.ctx.currentTime, 0.03);
-  }
-
-  // 磁带音效总音量 (0~1)，可外部调节
-  private sfxVolume = 0.6;
-
   /** 设置磁带机械音效总音量 (0~1)；0 时休眠持续源，>0 时唤醒 */
   setSfxVolume(v: number) {
     this.sfxVolume = Math.max(0, Math.min(1, v));
     if (!this.ctx || !this.masterGain) return;
-    this.masterGain.gain.setTargetAtTime(
-      this.sfxVolume,
-      this.ctx.currentTime,
-      0.03
-    );
-    // 音量归 0：停止持续源（释放 CPU）
+    this.masterGain.gain.setTargetAtTime(this.sfxVolume, this.ctx.currentTime, 0.03);
     if (this.sfxVolume <= 0.001 && this.sourcesActive) {
       this.stopContinuousSources();
     } else if (this.sfxVolume > 0.001 && !this.sourcesActive && this.started) {
-      // 从 0 恢复：重新启动持续源
       this.startContinuousSources();
     }
   }
@@ -353,46 +296,4 @@ class TapeSoundEngine {
     this.ctx = null;
     this.started = false;
   }
-}
-
-/**
- * Hook：在组件中安全使用磁带音效引擎
- */
-export function useTapeSounds() {
-  const engineRef = useRef<TapeSoundEngine | null>(null);
-  const sfxVolumeRef = useRef(0.6);
-
-  useEffect(() => {
-    return () => {
-      engineRef.current?.dispose();
-      engineRef.current = null;
-    };
-  }, []);
-
-  const getEngine = useCallback(() => {
-    if (!engineRef.current) {
-      engineRef.current = new TapeSoundEngine();
-    }
-    engineRef.current.init();
-    engineRef.current.setSfxVolume(sfxVolumeRef.current);
-    engineRef.current.resume();
-    return engineRef.current;
-  }, []);
-
-  /** 设置磁带音效音量 (0~1) */
-  const setSfxVolume = useCallback((v: number) => {
-    sfxVolumeRef.current = Math.max(0, Math.min(1, v));
-    engineRef.current?.setSfxVolume(sfxVolumeRef.current);
-  }, []);
-
-  return useMemo(
-    () => ({
-      ensure: getEngine,
-      setSfxVolume,
-      get engine() {
-        return engineRef.current;
-      },
-    }),
-    [getEngine, setSfxVolume]
-  );
 }

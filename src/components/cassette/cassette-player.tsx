@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import React from "react";
 import {
   Volume2,
   VolumeX,
@@ -17,9 +17,9 @@ import {
 import { TransportControls } from "./transport-controls";
 import { SourceLoader, type Track } from "./source-loader";
 import { TapeSlider, type TapeSliderHandle } from "./tape-slider";
-import { useTapeSounds } from "@/hooks/use-tape-sounds";
-import { useAudioEngine } from "@/hooks/use-audio-engine";
-import { useCircularDrag } from "@/hooks/use-circular-drag";
+import { TapeSoundEngine } from "@/lib/tape-sound-engine";
+import { TapeAudioEngine } from "@/lib/audio-engine";
+import { setupCircularDrag } from "@/lib/circular-drag";
 import { Button } from "@/components/ui/button";
 import {
   Tooltip,
@@ -31,15 +31,10 @@ import {
 // 带卷视觉旋转速度（度/秒）
 const PLAY_DEG_PER_SEC = 80;
 const WIND_DEG_PER_SEC = 760;
-// 快退 seek 速度（倍速）
 const WIND_REWIND_SPEED = 8;
-// 快进按钮播放倍率（实时变调高音）
 const FF_RATE = 4;
-// 拖拽：每弧度对应的倒带秒数（逆时针用）
 const SEEK_PER_RAD_REVERSE = 1.8;
-// 正常播放对应的带卷角速度（rad/s），用于把拖拽角速度换算为 rate
 const NORMAL_OMEGA = (PLAY_DEG_PER_SEC * Math.PI) / 180;
-// 拖拽顺时针 rate 范围
 const DRAG_MAX_RATE = 5;
 
 function formatTime(s: number): string {
@@ -52,188 +47,225 @@ function formatTime(s: number): string {
 const clamp = (v: number, lo: number, hi: number) =>
   Math.max(lo, Math.min(hi, v));
 
-export function CassettePlayer() {
-  // ===== 状态 =====
-  const [track, setTrack] = useState<Track | null>(null);
-  const [playing, setPlaying] = useState(false);
-  const [winding, setWinding] = useState<Winding>(null);
-  const [duration, setDuration] = useState(0);
-  const [volume, setVolume] = useState(0.85);
-  const [muted, setMuted] = useState(false);
-  const [sfxVolume, setSfxVolume] = useState(0.6);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [soundsOn, setSoundsOn] = useState(true);
-  const [progress, setProgress] = useState(0); // 低频更新（磁带半径视觉）
+interface PlayerState {
+  track: Track | null;
+  playing: boolean;
+  winding: Winding;
+  duration: number;
+  volume: number;
+  muted: boolean;
+  sfxVolume: number;
+  loading: boolean;
+  error: string | null;
+  soundsOn: boolean;
+  progress: number; // 低频更新（磁带半径视觉）
+}
 
-  const hasTape = track !== null;
+const INITIAL_STATE: PlayerState = {
+  track: null,
+  playing: false,
+  winding: null,
+  duration: 0,
+  volume: 0.85,
+  muted: false,
+  sfxVolume: 0.6,
+  loading: false,
+  error: null,
+  soundsOn: true,
+  progress: 0,
+};
 
-  // ===== refs =====
-  const leftReelElRef = useRef<SVGGElement | null>(null);
-  const rightReelElRef = useRef<SVGGElement | null>(null);
-  const leftAngleRef = useRef(0);
-  const rightAngleRef = useRef(0);
+/**
+ * CassettePlayer —— React 类组件实现（无任何 React hook）
+ *
+ * 用实例属性代替 useRef（ref 对象 / 闭包变量），
+ * 用类方法代替 useCallback（方法天然稳定引用）。
+ * rAF 智能启停 + updateUI DOM 直接更新去重，降低 CPU。
+ */
+export class CassettePlayer extends React.Component<Record<string, never>, PlayerState> {
+  state: PlayerState = INITIAL_STATE;
 
-  // DOM refs：rAF 直接更新 DOM，避免每帧 setState 重渲染（CPU 优化）
-  const progressSliderRef = useRef<TapeSliderHandle | null>(null);
-  const currentTimeLabelRef = useRef<HTMLSpanElement | null>(null);
-  const rateBadgeRef = useRef<HTMLSpanElement | null>(null);
+  // 引擎实例（代替 useRef + useEffect 创建）
+  private tapeSounds = new TapeSoundEngine();
+  private audio = new TapeAudioEngine({
+    onEnded: () => this.handleAudioEnded(),
+    onLoaded: (dur) => this.handleAudioLoaded(dur),
+    onError: (msg) => this.handleAudioError(msg),
+  });
 
-  const playingRef = useRef(false);
-  const windingRef = useRef<Winding>(null);
-  const hasTapeRef = useRef(false);
-  const durationRef = useRef(0);
-  const soundsOnRef = useRef(true);
-  const rafRef = useRef<number | null>(null);
-  const progressFrameRef = useRef(0); // 节流计数（磁带半径每 6 帧更新一次）
+  // SVG 带卷元素（代替 useRef）
+  private leftReelEl: SVGGElement | null = null;
+  private rightReelEl: SVGGElement | null = null;
+  private leftAngle = 0;
+  private rightAngle = 0;
+
+  // DOM 元素：rAF 直接更新 DOM（避免每帧 setState）
+  private progressSlider: TapeSliderHandle | null = null;
+  private currentTimeLabel: HTMLSpanElement | null = null;
+  private rateBadge: HTMLSpanElement | null = null;
+
+  // 同步状态镜像（rAF 读这些值，避免读 state 的闭包问题）
+  private playing = false;
+  private winding: Winding = null;
+  private hasTape = false;
+  private durationVal = 0;
+  private soundsOn = true;
+  private rafId: number | null = null;
+  private rafActive = false;
+  private progressFrame = 0;
+  private lastUITime = -1;
+  private lastUIRate = -999;
 
   // 拖拽状态
-  const dragStateRef = useRef({
+  private dragState = {
     active: false,
     side: "right" as "left" | "right",
     wasPlaying: false,
     direction: "none" as "forward" | "backward" | "none",
     omega: 0,
     lastRotateTime: 0,
-    rewindSpeed: 0, // 逆时针倒带速度（秒/秒）
-  });
-
-  const tapeSounds = useTapeSounds();
-  const audio = useAudioEngine();
-
-  // DOM 直接更新辅助函数：rAF 高频调用，不触发 React 重渲染（CPU 优化核心）
-  // 去重：值不变不写 DOM，进一步降低开销
-  const lastUITimeRef = useRef(-1);
-  const lastUIRateRef = useRef(-999);
-
-  const updateUI = useCallback((time: number, rate: number) => {
-    if (time !== lastUITimeRef.current) {
-      lastUITimeRef.current = time;
-      if (progressSliderRef.current) progressSliderRef.current.setValue(time);
-      if (currentTimeLabelRef.current)
-        currentTimeLabelRef.current.textContent = formatTime(time);
-      // 磁带半径节流：每 6 帧才 setState（~10fps，仅重渲染磁带半径）
-      progressFrameRef.current++;
-      if (progressFrameRef.current >= 6) {
-        progressFrameRef.current = 0;
-        const dur = durationRef.current;
-        setProgress(dur > 0 ? time / dur : 0);
-      }
-    }
-    if (rate !== lastUIRateRef.current) {
-      lastUIRateRef.current = rate;
-      if (rateBadgeRef.current) {
-        const label =
-          rate === 0
-            ? "—"
-            : rate < 0.95
-              ? `${rate.toFixed(2)}× ↓`
-              : rate > 1.05
-                ? `${rate.toFixed(2)}× ↑`
-                : "1.00×";
-        rateBadgeRef.current.textContent = label;
-      }
-    }
-  }, []);
-
-  // 回调绑定
-  audio.onEndedRef.current = () => {
-    setPlaying(false);
-    windingRef.current = null;
-    setWinding(null);
-    updateUI(0, 1);
-    if (soundsOnRef.current) {
-      const eng = tapeSounds.ensure();
-      eng.setHiss(false);
-      eng.brake();
-    }
   };
-  audio.onLoadedRef.current = (dur) => {
-    setDuration(dur);
-    durationRef.current = dur;
-    if (soundsOnRef.current) {
-      tapeSounds.ensure().load();
+
+  // 圆形拖拽控制器（setupCircularDrag 返回）
+  private leftDrag: ReturnType<typeof setupCircularDrag> | null = null;
+  private rightDrag: ReturnType<typeof setupCircularDrag> | null = null;
+
+  // React ref 用于类组件获取子组件实例（TapeSlider 是类组件，ref 拿到实例）
+  private progressSliderRef = React.createRef<TapeSlider>();
+
+  componentDidMount() {
+    // 绑定 progressSlider 实例
+    this.progressSlider = this.progressSliderRef.current;
+
+    // 创建两个圆形拖拽控制器
+    this.leftDrag = setupCircularDrag(
+      () => this.leftReelEl,
+      {
+        onRotate: (d) => this.handleRotate(d, "left"),
+        onDragStart: () => this.handleDragStart("left"),
+        onDragEnd: () => this.handleDragEnd(),
+      }
+    );
+    this.rightDrag = setupCircularDrag(
+      () => this.rightReelEl,
+      {
+        onRotate: (d) => this.handleRotate(d, "right"),
+        onDragStart: () => this.handleDragStart("right"),
+        onDragEnd: () => this.handleDragEnd(),
+      }
+    );
+
+    // 初始音量同步
+    this.audio.setVolume(this.state.muted ? 0 : this.state.volume);
+    this.tapeSounds.setSfxVolume(this.state.sfxVolume);
+  }
+
+  componentWillUnmount() {
+    if (this.rafId) cancelAnimationFrame(this.rafId);
+    this.leftDrag?.cleanup();
+    this.rightDrag?.cleanup();
+    this.tapeSounds.dispose();
+    this.audio.dispose();
+  }
+
+  componentDidUpdate(_prevProps: Record<string, never>, prevState: PlayerState) {
+    // 同步镜像（state → 实例字段，供 rAF 读取）
+    if (prevState.playing !== this.state.playing) this.playing = this.state.playing;
+    if (prevState.winding !== this.state.winding) this.winding = this.state.winding;
+    if (prevState.duration !== this.state.duration) this.durationVal = this.state.duration;
+    if (prevState.soundsOn !== this.state.soundsOn) {
+      this.soundsOn = this.state.soundsOn;
+      if (!this.soundsOn) {
+        this.tapeSounds.setHiss(false);
+        this.tapeSounds.setWind(0, true);
+      }
+    }
+    // hasTape 镜像
+    const hasTape = this.state.track !== null;
+    if (prevState.track !== this.state.track) this.hasTape = hasTape;
+
+    // 音量变化时同步到引擎
+    if (
+      prevState.volume !== this.state.volume ||
+      prevState.muted !== this.state.muted
+    ) {
+      this.audio.setVolume(this.state.muted ? 0 : this.state.volume);
+    }
+    if (prevState.sfxVolume !== this.state.sfxVolume) {
+      this.tapeSounds.setSfxVolume(this.state.sfxVolume);
+    }
+
+    // playing/winding 变化时确保 rAF 运行
+    if (this.state.playing || this.state.winding !== null) {
+      this.ensureRAF();
+    }
+  }
+
+  // ===== 音频引擎回调 =====
+  private handleAudioEnded() {
+    this.setState({ playing: false, winding: null });
+    this.winding = null;
+    this.updateUI(0, 1);
+    if (this.soundsOn) {
+      const eng = this.ensureSounds();
+      if (eng) {
+        eng.setHiss(false);
+        eng.brake();
+      }
+    }
+  }
+
+  private handleAudioLoaded(dur: number) {
+    this.setState({ duration: dur });
+    this.durationVal = dur;
+    if (this.soundsOn) {
+      const eng = this.ensureSounds();
+      if (eng) eng.load();
     }
     // 延迟自动播放
     setTimeout(() => {
-      if (hasTapeRef.current) {
-        audio.play(0);
-        setPlaying(true);
-        if (soundsOnRef.current) tapeSounds.ensure().setHiss(true);
+      if (this.hasTape) {
+        this.audio.play(0);
+        this.setState({ playing: true });
+        this.playing = true;
+        this.ensureRAF();
+        if (this.soundsOn) {
+          const eng = this.ensureSounds();
+          if (eng) eng.setHiss(true);
+        }
       }
     }, 700);
-  };
-  audio.onErrorRef.current = (msg) => {
-    setError(msg);
-    setPlaying(false);
-  };
+  }
 
-  // 同步 ref
-  useEffect(() => {
-    playingRef.current = playing;
-  }, [playing]);
-  useEffect(() => {
-    windingRef.current = winding;
-  }, [winding]);
-  useEffect(() => {
-    hasTapeRef.current = hasTape;
-  }, [hasTape]);
-  useEffect(() => {
-    durationRef.current = duration;
-  }, [duration]);
-  useEffect(() => {
-    soundsOnRef.current = soundsOn;
-    if (!soundsOn) {
-      tapeSounds.engine?.setHiss(false);
-      tapeSounds.engine?.setWind(0, true);
-    }
-  }, [soundsOn, tapeSounds]);
-  useEffect(() => {
-    tapeSounds.setSfxVolume(sfxVolume);
-  }, [sfxVolume, tapeSounds]);
-  useEffect(() => {
-    audio.setVolume(muted ? 0 : volume);
-  }, [volume, muted, audio]);
+  private handleAudioError(msg: string) {
+    this.setState({ error: msg, playing: false });
+  }
 
-  // 带卷 transform
-  const applyReelTransform = useCallback(() => {
-    if (leftReelElRef.current) {
-      leftReelElRef.current.setAttribute(
-        "transform",
-        `rotate(${leftAngleRef.current} ${REEL_GEOM.leftCx} ${REEL_GEOM.cy})`
-      );
-    }
-    if (rightReelElRef.current) {
-      rightReelElRef.current.setAttribute(
-        "transform",
-        `rotate(${rightAngleRef.current} ${REEL_GEOM.rightCx} ${REEL_GEOM.cy})`
-      );
-    }
-  }, []);
+  // ===== 音效引擎辅助 =====
+  private ensureSounds(): TapeSoundEngine | null {
+    if (!this.soundsOn) return null;
+    this.tapeSounds.init();
+    this.tapeSounds.resume();
+    return this.tapeSounds;
+  }
 
-  // ===== rAF 主循环（智能启停：无活动时停止，降低 CPU） =====
-  const stopWindingRef = useRef<() => void>(() => {});
-  const rafActiveRef = useRef(false);
-
-  const ensureRAF = useCallback(() => {
-    if (rafActiveRef.current) return;
-    rafActiveRef.current = true;
+  // ===== rAF 主循环（智能启停） =====
+  private ensureRAF = () => {
+    if (this.rafActive) return;
+    this.rafActive = true;
     let last = performance.now();
     const loop = (now: number) => {
       const dt = Math.min(0.1, (now - last) / 1000);
       last = now;
-      const eng = audio.getEngine();
-      const ds = dragStateRef.current;
+      const eng = this.audio;
+      const ds = this.dragState;
 
-      // 引擎 tick（平滑 rate + 推进 playhead）
       if (eng) eng.tick(dt);
 
-      if (ds.active && eng && hasTapeRef.current) {
+      if (ds.active && eng && this.hasTape) {
         // ===== 拖拽模式 =====
         const sinceRotate = now - ds.lastRotateTime;
-
         if (ds.direction === "forward") {
-          // 顺时针：source 保持播放，rate 跟随角速度（连续变调）
           let omega = ds.omega;
           if (sinceRotate > 120) {
             omega = omega * Math.max(0, 1 - (sinceRotate - 120) / 400);
@@ -244,10 +276,9 @@ export function CassettePlayer() {
             DRAG_MAX_RATE
           );
           eng.setRate(rate);
-          updateUI(eng.currentTime, rate);
+          this.updateUI(eng.currentTime, rate);
           if (!eng.isPlaying) eng.play();
         } else if (ds.direction === "backward") {
-          // 逆时针：暂停 source + 手动倒退 playhead（精确）
           if (eng.isPlaying) eng.pause();
           let rewindSpeed = Math.abs(ds.omega) * 1.2;
           if (sinceRotate > 120) {
@@ -256,589 +287,584 @@ export function CassettePlayer() {
           rewindSpeed = clamp(rewindSpeed, 0, 12);
           const newTime = eng.currentTime - rewindSpeed * dt;
           eng.setPlayhead(newTime);
-          updateUI(eng.currentTime, 0);
+          this.updateUI(eng.currentTime, 0);
         } else {
-          // direction=none：刚按下
           eng.setRate(0.0625);
-          updateUI(eng.currentTime, 0.0625);
+          this.updateUI(eng.currentTime, 0.0625);
         }
-
-        // 带卷视觉跟随角速度
         if (ds.direction !== "none") {
           const visOmega = Math.abs(ds.omega);
           const visDeg = visOmega * (180 / Math.PI) * dt;
           const sign = ds.direction === "forward" ? 1 : -1;
           if (ds.side === "right") {
-            rightAngleRef.current += sign * visDeg;
-            leftAngleRef.current -= sign * visDeg;
+            this.rightAngle += sign * visDeg;
+            this.leftAngle -= sign * visDeg;
           } else {
-            leftAngleRef.current -= sign * visDeg;
-            rightAngleRef.current += sign * visDeg;
+            this.leftAngle -= sign * visDeg;
+            this.rightAngle += sign * visDeg;
           }
-          applyReelTransform();
+          this.applyReelTransform();
         }
       } else {
         // ===== 非拖拽：正常播放 / 快进快退 =====
-        if (windingRef.current && eng && hasTapeRef.current) {
-          if (windingRef.current === "forward") {
+        if (this.winding && eng && this.hasTape) {
+          if (this.winding === "forward") {
             eng.setRate(FF_RATE);
             if (!eng.isPlaying) eng.play();
-            updateUI(eng.currentTime, FF_RATE);
+            this.updateUI(eng.currentTime, FF_RATE);
           } else {
             if (eng.isPlaying) eng.pause();
             const newTime = eng.currentTime - WIND_REWIND_SPEED * dt;
             eng.setPlayhead(newTime);
-            updateUI(eng.currentTime, 0);
-            if (eng.currentTime <= 0.05) stopWindingRef.current();
+            this.updateUI(eng.currentTime, 0);
+            if (eng.currentTime <= 0.05) this.stopWinding();
           }
-        } else if (playingRef.current && eng) {
+        } else if (this.playing && eng) {
           eng.setRate(1);
-          updateUI(eng.currentTime, 1);
-        } else {
-          // 暂停/无活动：不调 updateUI（去重，避免空转写 DOM）
+          this.updateUI(eng.currentTime, 1);
         }
-
-        // 带卷旋转
-        if (hasTapeRef.current) {
-          if (windingRef.current === "forward") {
-            leftAngleRef.current -= WIND_DEG_PER_SEC * dt;
-            rightAngleRef.current += WIND_DEG_PER_SEC * dt;
-            applyReelTransform();
-          } else if (windingRef.current === "rewind") {
-            leftAngleRef.current += WIND_DEG_PER_SEC * dt;
-            rightAngleRef.current -= WIND_DEG_PER_SEC * dt;
-            applyReelTransform();
-          } else if (playingRef.current) {
-            leftAngleRef.current -= PLAY_DEG_PER_SEC * dt;
-            rightAngleRef.current += PLAY_DEG_PER_SEC * dt;
-            applyReelTransform();
+        if (this.hasTape) {
+          if (this.winding === "forward") {
+            this.leftAngle -= WIND_DEG_PER_SEC * dt;
+            this.rightAngle += WIND_DEG_PER_SEC * dt;
+            this.applyReelTransform();
+          } else if (this.winding === "rewind") {
+            this.leftAngle += WIND_DEG_PER_SEC * dt;
+            this.rightAngle -= WIND_DEG_PER_SEC * dt;
+            this.applyReelTransform();
+          } else if (this.playing) {
+            this.leftAngle -= PLAY_DEG_PER_SEC * dt;
+            this.rightAngle += PLAY_DEG_PER_SEC * dt;
+            this.applyReelTransform();
           }
         }
       }
 
-      // 智能启停：无活动时停止 rAF（降低 CPU）
-      const active =
-        playingRef.current ||
-        windingRef.current !== null ||
-        dragStateRef.current.active;
+      // 智能启停
+      const active = this.playing || this.winding !== null || this.dragState.active;
       if (active) {
-        rafRef.current = requestAnimationFrame(loop);
+        this.rafId = requestAnimationFrame(loop);
       } else {
-        rafActiveRef.current = false;
-        rafRef.current = null;
+        this.rafActive = false;
+        this.rafId = null;
       }
     };
-    rafRef.current = requestAnimationFrame(loop);
-  }, [applyReelTransform, audio, updateUI]);
+    this.rafId = requestAnimationFrame(loop);
+  };
 
-  // 播放/快进/拖拽启动时确保 rAF 运行
-  // 监听 playing/winding/drag 变化来启动 rAF
-  useEffect(() => {
-    if (playing || winding !== null) {
-      ensureRAF();
+  private applyReelTransform() {
+    if (this.leftReelEl) {
+      this.leftReelEl.setAttribute(
+        "transform",
+        `rotate(${this.leftAngle} ${REEL_GEOM.leftCx} ${REEL_GEOM.cy})`
+      );
     }
-  }, [playing, winding, ensureRAF]);
+    if (this.rightReelEl) {
+      this.rightReelEl.setAttribute(
+        "transform",
+        `rotate(${this.rightAngle} ${REEL_GEOM.rightCx} ${REEL_GEOM.cy})`
+      );
+    }
+  }
+
+  // DOM 直接更新（去重，值不变不写 DOM）
+  private updateUI(time: number, rate: number) {
+    if (time !== this.lastUITime) {
+      this.lastUITime = time;
+      if (this.progressSlider) this.progressSlider.setValue(time);
+      if (this.currentTimeLabel)
+        this.currentTimeLabel.textContent = formatTime(time);
+      this.progressFrame++;
+      if (this.progressFrame >= 6) {
+        this.progressFrame = 0;
+        const dur = this.durationVal;
+        this.setState({ progress: dur > 0 ? time / dur : 0 });
+      }
+    }
+    if (rate !== this.lastUIRate) {
+      this.lastUIRate = rate;
+      if (this.rateBadge) {
+        const label =
+          rate === 0
+            ? "—"
+            : rate < 0.95
+              ? `${rate.toFixed(2)}× ↓`
+              : rate > 1.05
+                ? `${rate.toFixed(2)}× ↑`
+                : "1.00×";
+        this.rateBadge.textContent = label;
+      }
+    }
+  }
 
   // ===== 控制函数 =====
-
-  const ensureSounds = useCallback(() => {
-    if (!soundsOnRef.current) return null;
-    return tapeSounds.ensure();
-  }, [tapeSounds]);
-
-  const play = useCallback(() => {
-    const eng = audio.getEngine();
-    if (!eng || !hasTapeRef.current) return;
-    audio.resume();
+  private play = () => {
+    const eng = this.audio;
+    if (!this.hasTape) return;
+    this.audio.resume();
     eng.setRate(1);
     if (!eng.isPlaying) eng.play();
-    setPlaying(true);
-    ensureRAF();
-    if (soundsOnRef.current) {
-      const sEng = tapeSounds.ensure();
-      sEng.click(0.8);
-      sEng.setHiss(true);
+    this.setState({ playing: true });
+    this.playing = true;
+    this.ensureRAF();
+    if (this.soundsOn) {
+      const sEng = this.ensureSounds();
+      if (sEng) {
+        sEng.click(0.8);
+        sEng.setHiss(true);
+      }
     }
-  }, [audio, tapeSounds, ensureRAF]);
+  };
 
-  const pause = useCallback(() => {
-    const eng = audio.getEngine();
-    if (!eng) return;
+  private pause = () => {
+    const eng = this.audio;
     eng.pause();
     eng.setRate(1);
-    setPlaying(false);
-    if (soundsOnRef.current) {
-      const sEng = tapeSounds.ensure();
-      sEng.click(0.7);
-      sEng.setHiss(false);
+    this.setState({ playing: false });
+    this.playing = false;
+    if (this.soundsOn) {
+      const sEng = this.ensureSounds();
+      if (sEng) {
+        sEng.click(0.7);
+        sEng.setHiss(false);
+      }
     }
-  }, [audio, tapeSounds]);
+  };
 
-  const stop = useCallback(() => {
-    const eng = audio.getEngine();
-    if (!eng) return;
+  private stop = () => {
+    const eng = this.audio;
     eng.stop();
     eng.setRate(1);
-    setPlaying(false);
-    setWinding(null);
-    windingRef.current = null;
-    updateUI(0, 0);
-    if (soundsOnRef.current) {
-      const sEng = tapeSounds.ensure();
-      sEng.brake();
-      sEng.setHiss(false);
-      sEng.setWind(0, true);
-    }
-  }, [audio, tapeSounds]);
-
-  const startWinding = useCallback(
-    (dir: "forward" | "rewind") => {
-      const eng = audio.getEngine();
-      if (!eng || !hasTapeRef.current) return;
-      audio.resume();
-      if (dir === "forward") {
-        eng.setRate(FF_RATE);
-        if (!eng.isPlaying) eng.play();
-        setPlaying(true);
-      } else {
-        eng.pause();
-        setPlaying(false);
+    this.setState({ playing: false, winding: null });
+    this.playing = false;
+    this.winding = null;
+    this.updateUI(0, 0);
+    if (this.soundsOn) {
+      const sEng = this.ensureSounds();
+      if (sEng) {
+        sEng.brake();
+        sEng.setHiss(false);
+        sEng.setWind(0, true);
       }
-      setWinding(dir);
-      windingRef.current = dir;
-      ensureRAF();
-      if (soundsOnRef.current) {
-        const sEng = tapeSounds.ensure();
+    }
+  };
+
+  private startWinding = (dir: "forward" | "rewind") => {
+    const eng = this.audio;
+    if (!this.hasTape) return;
+    this.audio.resume();
+    if (dir === "forward") {
+      eng.setRate(FF_RATE);
+      if (!eng.isPlaying) eng.play();
+      this.setState({ playing: true });
+      this.playing = true;
+    } else {
+      eng.pause();
+      this.setState({ playing: false });
+      this.playing = false;
+    }
+    this.setState({ winding: dir });
+    this.winding = dir;
+    this.ensureRAF();
+    if (this.soundsOn) {
+      const sEng = this.ensureSounds();
+      if (sEng) {
         sEng.click(0.9);
         sEng.setHiss(false);
         sEng.setWind(0.85, dir === "forward");
       }
-    },
-    [audio, tapeSounds, ensureRAF]
-  );
+    }
+  };
 
-  const stopWinding = useCallback(() => {
-    if (!windingRef.current) return;
-    const wasForward = windingRef.current === "forward";
-    setWinding(null);
-    windingRef.current = null;
-    const eng = audio.getEngine();
-    if (eng) {
-      eng.setRate(1);
+  private stopWinding = () => {
+    if (!this.winding) return;
+    const wasForward = this.winding === "forward";
+    this.setState({ winding: null });
+    this.winding = null;
+    this.audio.setRate(1);
+    if (this.soundsOn) {
+      const sEng = this.ensureSounds();
+      if (sEng) {
+        sEng.setWind(0, true);
+        sEng.brake();
+      }
     }
-    if (soundsOnRef.current) {
-      const sEng = tapeSounds.ensure();
-      sEng.setWind(0, true);
-      sEng.brake();
-    }
-    // 快进松手后保持播放（已经是 playing 状态）
     if (!wasForward) {
-      setPlaying(false);
+      this.setState({ playing: false });
+      this.playing = false;
     }
-  }, [audio, tapeSounds]);
+  };
 
-  useEffect(() => {
-    stopWindingRef.current = stopWinding;
-  }, [stopWinding]);
-
-  const eject = useCallback(() => {
-    const eng = audio.getEngine();
-    if (eng) {
-      eng.pause();
-      eng.setRate(1);
+  private eject = () => {
+    this.audio.pause();
+    this.audio.setRate(1);
+    this.setState({ playing: false, winding: null, duration: 0, track: null });
+    this.playing = false;
+    this.winding = null;
+    this.hasTape = false;
+    this.durationVal = 0;
+    this.updateUI(0, 0);
+    this.leftAngle = 0;
+    this.rightAngle = 0;
+    this.applyReelTransform();
+    if (this.soundsOn) {
+      const sEng = this.ensureSounds();
+      if (sEng) {
+        sEng.eject();
+        sEng.setHiss(false);
+        sEng.setWind(0, true);
+      }
     }
-    setPlaying(false);
-    setWinding(null);
-    windingRef.current = null;
-    updateUI(0, 0);
-    setDuration(0);
-    durationRef.current = 0;
-    setTrack(null);
-    hasTapeRef.current = false;
-    leftAngleRef.current = 0;
-    rightAngleRef.current = 0;
-    applyReelTransform();
-    if (soundsOnRef.current) {
-      const sEng = tapeSounds.ensure();
-      sEng.eject();
-      sEng.setHiss(false);
-      sEng.setWind(0, true);
-    }
-  }, [audio, tapeSounds, applyReelTransform]);
+  };
 
   // ===== 拖拽 =====
-
-  const handleDragStart = useCallback(
-    (side: "left" | "right") => {
-      const eng = audio.getEngine();
-      if (!eng || !hasTapeRef.current) return;
-      audio.resume();
-      dragStateRef.current.active = true;
-      dragStateRef.current.side = side;
-      dragStateRef.current.wasPlaying = playingRef.current;
-      dragStateRef.current.direction = "none";
-      dragStateRef.current.omega = 0;
-      dragStateRef.current.lastRotateTime = performance.now();
-      // 拖拽启动时确保 rAF 运行
-      ensureRAF();
-      if (soundsOnRef.current) {
-        const sEng = tapeSounds.ensure();
+  private handleDragStart = (side: "left" | "right") => {
+    if (!this.hasTape) return;
+    this.audio.resume();
+    this.dragState.active = true;
+    this.dragState.side = side;
+    this.dragState.wasPlaying = this.playing;
+    this.dragState.direction = "none";
+    this.dragState.omega = 0;
+    this.dragState.lastRotateTime = performance.now();
+    this.ensureRAF();
+    if (this.soundsOn) {
+      const sEng = this.ensureSounds();
+      if (sEng) {
         sEng.setHiss(false);
         sEng.setWind(0.45, side === "right");
       }
-    },
-    [audio, tapeSounds, ensureRAF]
-  );
-
-  const handleDragEnd = useCallback(() => {
-    if (!dragStateRef.current.active) return;
-    const wasPlaying = dragStateRef.current.wasPlaying;
-    const ds = dragStateRef.current;
-    ds.active = false;
-    ds.direction = "none";
-    const eng = audio.getEngine();
-    if (eng) {
-      eng.setRate(1);
     }
-    if (soundsOnRef.current) {
-      const sEng = tapeSounds.ensure();
-      sEng.setWind(0, true);
-      sEng.brake();
-    }
-    // 恢复播放
-    if (wasPlaying && eng) {
-      eng.play();
-      setPlaying(true);
-      if (soundsOnRef.current) tapeSounds.ensure().setHiss(true);
-    } else if (eng) {
-      setPlaying(false);
-    }
-  }, [audio, tapeSounds]);
-
-  const handleRotate = useCallback(
-    (deltaRad: number, side: "left" | "right") => {
-      if (!dragStateRef.current.active || !hasTapeRef.current) return;
-      const now = performance.now();
-      const ds = dragStateRef.current;
-
-      // 瞬时角速度，低通滤波平滑
-      const dt = Math.max(0.001, (now - ds.lastRotateTime) / 1000);
-      const instOmega = deltaRad / dt;
-      ds.omega = ds.omega * 0.55 + instOmega * 0.45;
-      ds.lastRotateTime = now;
-
-      // 判断方向：右卷 delta>0 = 快进；左卷 delta>0 = 倒带
-      let forward: boolean;
-      if (side === "right") {
-        forward = deltaRad > 0;
-      } else {
-        forward = deltaRad < 0;
-      }
-      ds.direction = forward ? "forward" : "backward";
-
-      // 立即更新带卷视觉（跟手）
-      const degDelta = deltaRad * (180 / Math.PI);
-      if (side === "right") {
-        rightAngleRef.current += degDelta;
-        leftAngleRef.current -= degDelta;
-      } else {
-        leftAngleRef.current += degDelta;
-        rightAngleRef.current -= degDelta;
-      }
-      applyReelTransform();
-    },
-    [applyReelTransform]
-  );
-
-  const leftDrag = useCircularDrag({
-    onRotate: (d) => handleRotate(d, "left"),
-    onDragStart: () => handleDragStart("left"),
-    onDragEnd: handleDragEnd,
-  });
-  const rightDrag = useCircularDrag({
-    onRotate: (d) => handleRotate(d, "right"),
-    onDragStart: () => handleDragStart("right"),
-    onDragEnd: handleDragEnd,
-  });
-
-  const leftReelRef = useCallback(
-    (el: SVGGElement | null) => {
-      leftReelElRef.current = el;
-      leftDrag.bind(el);
-    },
-    [leftDrag]
-  );
-  const rightReelRef = useCallback(
-    (el: SVGGElement | null) => {
-      rightReelElRef.current = el;
-      rightDrag.bind(el);
-    },
-    [rightDrag]
-  );
-
-  const onReelPointerDown = useCallback(
-    (e: React.PointerEvent<SVGGElement>, side: "left" | "right") => {
-      ensureSounds();
-      if (side === "left") leftDrag.handlers.onPointerDown(e);
-      else rightDrag.handlers.onPointerDown(e);
-    },
-    [leftDrag, rightDrag, ensureSounds]
-  );
-
-  // ===== 音频源加载 =====
-
-  const loadTrack = useCallback(
-    async (newTrack: Track) => {
-      if (hasTapeRef.current && soundsOnRef.current) {
-        tapeSounds.ensure().eject();
-      }
-      const eng = audio.getEngine();
-      if (eng) {
-        eng.pause();
-      }
-      setPlaying(false);
-      setWinding(null);
-      windingRef.current = null;
-      updateUI(0, 0);
-      setDuration(0);
-      durationRef.current = 0;
-      setError(null);
-      leftAngleRef.current = 0;
-      rightAngleRef.current = 0;
-      setTrack(newTrack);
-      hasTapeRef.current = true;
-      // 加载音频
-      setLoading(true);
-      try {
-        await audio.load(newTrack.url);
-      } catch (e) {
-        setError(
-          `音频加载失败：${e instanceof Error ? e.message : "未知错误"}`
-        );
-      } finally {
-        setLoading(false);
-      }
-    },
-    [audio, tapeSounds]
-  );
-
-  const handleNetEase = useCallback(
-    async (input: string) => {
-      setLoading(true);
-      setError(null);
-      try {
-        const idMatch = input.trim().match(/\d+/);
-        if (!idMatch) {
-          setError("无法识别歌曲 ID，请输入数字 ID 或网易云分享链接。");
-          setLoading(false);
-          return;
-        }
-        const id = idMatch[0];
-        const res = await fetch(`/api/netease/song?id=${id}`);
-        const data = await res.json();
-        if (!data.ok) {
-          setError(data.error || "解析失败");
-          setLoading(false);
-          return;
-        }
-        const song = data.data;
-        // 用后端代理音频流（同源），使 Web Audio 能 fetch + decode 成 AudioBuffer
-        await loadTrack({
-          url: `/api/netease/audio?id=${song.id}`,
-          name: song.name,
-          artist: song.artist,
-          album: song.album,
-          cover: song.cover,
-        });
-      } catch (e) {
-        setError(
-          `解析失败：${e instanceof Error ? e.message : "未知错误"}`
-        );
-      } finally {
-        setLoading(false);
-      }
-    },
-    [loadTrack]
-  );
-
-  const handleLoad = useCallback(
-    (newTrack: Track) => {
-      loadTrack(newTrack);
-    },
-    [loadTrack]
-  );
-
-  // 进度条 seek
-  const onProgressChange = (t: number) => {
-    const eng = audio.getEngine();
-    if (eng) {
-      eng.setRate(1);
-      eng.seek(t);
-    }
-    updateUI(t, 1);
   };
 
-  const VolumeIcon =
-    muted || volume === 0 ? VolumeX : volume < 0.5 ? Volume1 : Volume2;
+  private handleDragEnd = () => {
+    if (!this.dragState.active) return;
+    const wasPlaying = this.dragState.wasPlaying;
+    this.dragState.active = false;
+    this.dragState.direction = "none";
+    this.audio.setRate(1);
+    if (this.soundsOn) {
+      const sEng = this.ensureSounds();
+      if (sEng) {
+        sEng.setWind(0, true);
+        sEng.brake();
+      }
+    }
+    if (wasPlaying) {
+      this.audio.play();
+      this.setState({ playing: true });
+      this.playing = true;
+      if (this.soundsOn) {
+        const sEng = this.ensureSounds();
+        if (sEng) sEng.setHiss(true);
+      }
+    } else {
+      this.setState({ playing: false });
+      this.playing = false;
+    }
+  };
 
-  return (
-    <div className="w-full max-w-3xl mx-auto">
-      {/* 磁带本体 */}
-      <div className="relative rounded-2xl p-3 sm:p-5 bg-gradient-to-b from-stone-100 to-stone-200 dark:from-stone-900 dark:to-stone-950 border border-stone-300 dark:border-stone-700 shadow-2xl">
-        <CassetteTape
-          progress={progress}
-          name={track?.name || ""}
-          artist={track?.artist || ""}
-          album={track?.album}
-          playing={playing}
-          winding={winding}
-          hasTape={hasTape}
-          leftReelRef={leftReelRef}
-          rightReelRef={rightReelRef}
-          onReelPointerDown={onReelPointerDown}
-        />
-      </div>
+  private handleRotate = (deltaRad: number, side: "left" | "right") => {
+    if (!this.dragState.active || !this.hasTape) return;
+    const now = performance.now();
+    const ds = this.dragState;
+    const dt = Math.max(0.001, (now - ds.lastRotateTime) / 1000);
+    const instOmega = deltaRad / dt;
+    ds.omega = ds.omega * 0.55 + instOmega * 0.45;
+    ds.lastRotateTime = now;
+    let forward: boolean;
+    if (side === "right") {
+      forward = deltaRad > 0;
+    } else {
+      forward = deltaRad < 0;
+    }
+    ds.direction = forward ? "forward" : "backward";
+    const degDelta = deltaRad * (180 / Math.PI);
+    if (side === "right") {
+      this.rightAngle += degDelta;
+      this.leftAngle -= degDelta;
+    } else {
+      this.leftAngle += degDelta;
+      this.rightAngle -= degDelta;
+    }
+    this.applyReelTransform();
+  };
 
-      {/* 拖拽提示 + 实时速率 */}
-      {hasTape ? (
-        <div className="mt-3 flex items-center justify-center gap-3 text-xs text-stone-500 dark:text-stone-400 flex-wrap">
-          <span className="flex items-center gap-1.5">
-            <Hand className="w-3.5 h-3.5" />
-            <span>
-              在带卷上转圈滑动进退（顺时针＝快进变调，逆时针＝倒带）
-            </span>
-          </span>
-          <span className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-orange-950/60 border border-orange-700/40 text-orange-300 font-mono">
-            <Waves className="w-3 h-3" />
-            <span ref={rateBadgeRef}>1.00×</span>
-          </span>
+  private onReelPointerDown = (
+    e: React.PointerEvent<SVGGElement>,
+    side: "left" | "right"
+  ) => {
+    this.ensureSounds();
+    if (side === "left") this.leftDrag?.handlers.onPointerDown(e);
+    else this.rightDrag?.handlers.onPointerDown(e);
+  };
+
+  private setLeftReel = (el: SVGGElement | null) => {
+    this.leftReelEl = el;
+  };
+  private setRightReel = (el: SVGGElement | null) => {
+    this.rightReelEl = el;
+  };
+
+  // ===== 音频源加载 =====
+  private loadTrack = async (newTrack: Track) => {
+    if (this.hasTape && this.soundsOn) {
+      const eng = this.ensureSounds();
+      if (eng) eng.eject();
+    }
+    this.audio.pause();
+    this.setState({
+      playing: false,
+      winding: null,
+      duration: 0,
+      error: null,
+      track: newTrack,
+    });
+    this.playing = false;
+    this.winding = null;
+    this.hasTape = true;
+    this.durationVal = 0;
+    this.updateUI(0, 0);
+    this.leftAngle = 0;
+    this.rightAngle = 0;
+    this.applyReelTransform();
+    this.setState({ loading: true });
+    try {
+      await this.audio.load(newTrack.url);
+    } catch (e) {
+      this.setState({
+        error: `音频加载失败：${e instanceof Error ? e.message : "未知错误"}`,
+      });
+    } finally {
+      this.setState({ loading: false });
+    }
+  };
+
+  private handleNetEase = async (input: string) => {
+    this.setState({ loading: true, error: null });
+    try {
+      const idMatch = input.trim().match(/\d+/);
+      if (!idMatch) {
+        this.setState({
+          error: "无法识别歌曲 ID，请输入数字 ID 或网易云分享链接。",
+        });
+        return;
+      }
+      const id = idMatch[0];
+      const res = await fetch(`/api/netease/song?id=${id}`);
+      const data = await res.json();
+      if (!data.ok) {
+        this.setState({ error: data.error || "解析失败" });
+        return;
+      }
+      const song = data.data;
+      await this.loadTrack({
+        url: `/api/netease/audio?id=${song.id}`,
+        name: song.name,
+        artist: song.artist,
+        album: song.album,
+        cover: song.cover,
+      });
+    } catch (e) {
+      this.setState({
+        error: `解析失败：${e instanceof Error ? e.message : "未知错误"}`,
+      });
+    } finally {
+      this.setState({ loading: false });
+    }
+  };
+
+  private handleLoad = (newTrack: Track) => {
+    this.loadTrack(newTrack);
+  };
+
+  private onProgressChange = (t: number) => {
+    this.audio.setRate(1);
+    this.audio.seek(t);
+    this.updateUI(t, 1);
+  };
+
+  render() {
+    const {
+      track,
+      playing,
+      winding,
+      duration,
+      volume,
+      muted,
+      sfxVolume,
+      loading,
+      error,
+      soundsOn,
+      progress,
+    } = this.state;
+    const hasTape = track !== null;
+    const VolumeIcon =
+      muted || volume === 0 ? VolumeX : volume < 0.5 ? Volume1 : Volume2;
+
+    return (
+      <div className="w-full max-w-3xl mx-auto">
+        {/* 磁带本体 */}
+        <div className="relative rounded-2xl p-3 sm:p-5 bg-gradient-to-b from-stone-100 to-stone-200 dark:from-stone-900 dark:to-stone-950 border border-stone-300 dark:border-stone-700 shadow-2xl">
+          <CassetteTape
+            progress={progress}
+            name={track?.name || ""}
+            artist={track?.artist || ""}
+            album={track?.album}
+            playing={playing}
+            winding={winding}
+            hasTape={hasTape}
+            leftReelRef={this.setLeftReel}
+            rightReelRef={this.setRightReel}
+            onReelPointerDown={this.onReelPointerDown}
+          />
         </div>
-      ) : null}
 
-      {/* 传输控制 */}
-      <div className="mt-4 p-4 rounded-2xl bg-gradient-to-b from-stone-200 to-stone-300 dark:from-stone-800 dark:to-stone-900 border border-stone-400/40 dark:border-stone-700">
-        <TransportControls
-          playing={playing}
-          winding={winding}
-          hasTape={hasTape}
-          onPlayPause={() => {
-            ensureSounds();
-            if (playing) pause();
-            else play();
-          }}
-          onStop={stop}
-          onFastForwardStart={() => startWinding("forward")}
-          onFastForwardEnd={stopWinding}
-          onRewindStart={() => startWinding("rewind")}
-          onRewindEnd={stopWinding}
-          onEject={eject}
-        />
+        {/* 拖拽提示 + 实时速率 */}
+        {hasTape ? (
+          <div className="mt-3 flex items-center justify-center gap-3 text-xs text-stone-500 dark:text-stone-400 flex-wrap">
+            <span className="flex items-center gap-1.5">
+              <Hand className="w-3.5 h-3.5" />
+              <span>
+                在带卷上转圈滑动进退（顺时针＝快进变调，逆时针＝倒带）
+              </span>
+            </span>
+            <span className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-orange-950/60 border border-orange-700/40 text-orange-300 font-mono">
+              <Waves className="w-3 h-3" />
+              <span ref={(el) => { this.rateBadge = el; }}>1.00×</span>
+            </span>
+          </div>
+        ) : null}
 
-        {/* 进度条 */}
-        <div className="mt-4 px-1">
-          <div className="flex items-center gap-3">
-            <span ref={currentTimeLabelRef} className="text-xs font-mono tabular-nums text-stone-600 dark:text-stone-300 w-10 text-right">
-              0:00
-            </span>
-            <TapeSlider
-              ref={progressSliderRef}
-              value={0}
-              min={0}
-              max={duration > 0 ? duration : 1}
-              step={0.1}
-              onChange={onProgressChange}
-              disabled={!hasTape}
-              variant="progress"
-              ariaLabel="播放进度"
-            />
-            <span className="text-xs font-mono tabular-nums text-stone-500 dark:text-stone-400 w-10">
-              {formatTime(duration)}
-            </span>
+        {/* 传输控制 */}
+        <div className="mt-4 p-4 rounded-2xl bg-gradient-to-b from-stone-200 to-stone-300 dark:from-stone-800 dark:to-stone-900 border border-stone-400/40 dark:border-stone-700">
+          <TransportControls
+            playing={playing}
+            winding={winding}
+            hasTape={hasTape}
+            onPlayPause={() => {
+              this.ensureSounds();
+              if (playing) this.pause();
+              else this.play();
+            }}
+            onStop={this.stop}
+            onFastForwardStart={() => this.startWinding("forward")}
+            onFastForwardEnd={this.stopWinding}
+            onRewindStart={() => this.startWinding("rewind")}
+            onRewindEnd={this.stopWinding}
+            onEject={this.eject}
+          />
+
+          {/* 进度条 */}
+          <div className="mt-4 px-1">
+            <div className="flex items-center gap-3">
+              <span
+                ref={(el) => { this.currentTimeLabel = el; }}
+                className="text-xs font-mono tabular-nums text-stone-600 dark:text-stone-300 w-10 text-right"
+              >
+                0:00
+              </span>
+              <TapeSlider
+                ref={this.progressSliderRef}
+                value={0}
+                min={0}
+                max={duration > 0 ? duration : 1}
+                step={0.1}
+                onChange={this.onProgressChange}
+                disabled={!hasTape}
+                variant="progress"
+                ariaLabel="播放进度"
+              />
+              <span className="text-xs font-mono tabular-nums text-stone-500 dark:text-stone-400 w-10">
+                {formatTime(duration)}
+              </span>
+            </div>
+          </div>
+
+          {/* 音量 + 音效音量 */}
+          <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3 px-1">
+            <div className="flex items-center gap-2.5">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 text-stone-600 dark:text-stone-300 flex-shrink-0"
+                onClick={() => this.setState({ muted: !muted })}
+                aria-label={muted ? "取消静音" : "静音"}
+              >
+                <VolumeIcon className="w-4 h-4" />
+              </Button>
+              <TapeSlider
+                value={muted ? 0 : volume}
+                min={0}
+                max={1}
+                step={0.01}
+                onChange={(v) => {
+                  this.setState({ volume: v, muted: v > 0 ? false : muted });
+                }}
+                variant="volume"
+                ariaLabel="主音量"
+              />
+              <span className="text-[10px] font-mono tabular-nums text-stone-500 w-8 text-right">
+                {Math.round((muted ? 0 : volume) * 100)}
+              </span>
+            </div>
+
+            <div className="flex items-center gap-2.5">
+              <TooltipProvider delayDuration={200}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant={soundsOn ? "secondary" : "outline"}
+                      size="icon"
+                      className="h-8 w-8 flex-shrink-0"
+                      onClick={() => this.setState({ soundsOn: !soundsOn })}
+                      aria-label="磁带音效开关"
+                    >
+                      <Info className="w-4 h-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p>磁带机械音效开关</p>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+              <TapeSlider
+                value={soundsOn ? sfxVolume : 0}
+                min={0}
+                max={1}
+                step={0.01}
+                onChange={(v) => {
+                  this.setState({
+                    sfxVolume: v,
+                    soundsOn: v > 0 ? true : soundsOn,
+                  });
+                }}
+                variant="volume"
+                ariaLabel="磁带音效音量"
+              />
+              <span className="text-[10px] font-mono tabular-nums text-stone-500 w-8 text-right">
+                {soundsOn ? Math.round(sfxVolume * 100) : 0}
+              </span>
+            </div>
           </div>
         </div>
 
-        {/* 音量 + 音效音量 */}
-        <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3 px-1">
-          <div className="flex items-center gap-2.5">
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8 text-stone-600 dark:text-stone-300 flex-shrink-0"
-              onClick={() => setMuted((m) => !m)}
-              aria-label={muted ? "取消静音" : "静音"}
-            >
-              <VolumeIcon className="w-4 h-4" />
-            </Button>
-            <TapeSlider
-              value={muted ? 0 : volume}
-              min={0}
-              max={1}
-              step={0.01}
-              onChange={(v) => {
-                setVolume(v);
-                if (v > 0) setMuted(false);
-              }}
-              variant="volume"
-              ariaLabel="主音量"
-            />
-            <span className="text-[10px] font-mono tabular-nums text-stone-500 w-8 text-right">
-              {Math.round((muted ? 0 : volume) * 100)}
-            </span>
+        {/* 音频源加载 */}
+        <div className="mt-4 p-4 rounded-2xl bg-white/70 dark:bg-stone-900/70 border border-stone-300/60 dark:border-stone-700/60 backdrop-blur">
+          <div className="flex items-center gap-2 mb-3">
+            <div className="h-4 w-1 bg-orange-600 rounded-full" />
+            <h3 className="text-sm font-semibold text-stone-700 dark:text-stone-200">
+              装入磁带
+            </h3>
           </div>
-
-          <div className="flex items-center gap-2.5">
-            <TooltipProvider delayDuration={200}>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant={soundsOn ? "secondary" : "outline"}
-                    size="icon"
-                    className="h-8 w-8 flex-shrink-0"
-                    onClick={() => setSoundsOn((s) => !s)}
-                    aria-label="磁带音效开关"
-                  >
-                    <Info className="w-4 h-4" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>
-                  <p>磁带机械音效开关</p>
-                </TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
-            <TapeSlider
-              value={soundsOn ? sfxVolume : 0}
-              min={0}
-              max={1}
-              step={0.01}
-              onChange={(v) => {
-                setSfxVolume(v);
-                if (v > 0) setSoundsOn(true);
-              }}
-              variant="volume"
-              ariaLabel="磁带音效音量"
-            />
-            <span className="text-[10px] font-mono tabular-nums text-stone-500 w-8 text-right">
-              {soundsOn ? Math.round(sfxVolume * 100) : 0}
-            </span>
-          </div>
+          <SourceLoader
+            onLoad={this.handleLoad}
+            onNetEase={this.handleNetEase}
+            loading={loading}
+            error={error}
+          />
         </div>
       </div>
-
-      {/* 音频源加载 */}
-      <div className="mt-4 p-4 rounded-2xl bg-white/70 dark:bg-stone-900/70 border border-stone-300/60 dark:border-stone-700/60 backdrop-blur">
-        <div className="flex items-center gap-2 mb-3">
-          <div className="h-4 w-1 bg-orange-600 rounded-full" />
-          <h3 className="text-sm font-semibold text-stone-700 dark:text-stone-200">
-            装入磁带
-          </h3>
-        </div>
-        <SourceLoader
-          onLoad={handleLoad}
-          onNetEase={handleNetEase}
-          loading={loading}
-          error={error}
-        />
-      </div>
-    </div>
-  );
+    );
+  }
 }

@@ -1,13 +1,6 @@
 "use client";
 
-import {
-  forwardRef,
-  useCallback,
-  useEffect,
-  useImperativeHandle,
-  useRef,
-  useState,
-} from "react";
+import React from "react";
 
 interface TapeSliderProps {
   value: number;
@@ -16,7 +9,6 @@ interface TapeSliderProps {
   step?: number;
   onChange: (value: number) => void;
   disabled?: boolean;
-  /** 轨道高度风格 */
   variant?: "progress" | "volume";
   ariaLabel?: string;
 }
@@ -30,15 +22,76 @@ const clamp = (v: number, lo: number, hi: number) =>
   Math.max(lo, Math.min(hi, v));
 
 /**
- * 自定义复古滑块
+ * 自定义复古滑块（React 类组件，无 hooks）
  * - pointer 事件实现，避免原生 input range 样式问题与 Radix Slider 的卡顿
  * - 支持拖拽、点击轨道跳转、键盘左右箭头
  * - touch-action:none 防止移动端下拉刷新
- * - 暴露 imperative handle，rAF 可直接更新 DOM（避免每帧 setState）
+ * - 暴露 setValue 给父组件，rAF 可直接更新 DOM（避免每帧 setState）
  */
-export const TapeSlider = forwardRef<TapeSliderHandle, TapeSliderProps>(
-  function TapeSlider(
-    {
+export class TapeSlider extends React.Component<
+  TapeSliderProps,
+  { dragging: boolean }
+> implements TapeSliderHandle
+{
+  trackEl: HTMLDivElement | null = null;
+  fillEl: HTMLDivElement | null = null;
+  thumbEl: HTMLDivElement | null = null;
+
+  // 事件处理器绑定（实例方法，稳定引用）
+  private boundWindowMove: (e: PointerEvent) => void;
+  private boundWindowUp: () => void;
+
+  constructor(props: TapeSliderProps) {
+    super(props);
+    this.state = { dragging: false };
+    this.boundWindowMove = (e: PointerEvent) => {
+      e.preventDefault();
+      this.setFromClientX(e.clientX);
+    };
+    this.boundWindowUp = () => this.setState({ dragging: false });
+  }
+
+  // imperative：rAF 高频更新 DOM，不触发 React 重渲染
+  setValue(v: number) {
+    const { min, max } = this.props;
+    const p = max > min ? clamp(((v - min) / (max - min)) * 100, 0, 100) : 0;
+    if (this.fillEl) this.fillEl.style.width = `${p}%`;
+    if (this.thumbEl) this.thumbEl.style.left = `${p}%`;
+  }
+
+  private setFromClientX(clientX: number) {
+    if (!this.trackEl) return;
+    const { min, max, step = 0.01, onChange } = this.props;
+    const rect = this.trackEl.getBoundingClientRect();
+    const ratio = clamp((clientX - rect.left) / rect.width, 0, 1);
+    const raw = min + ratio * (max - min);
+    const snapped = Math.round(raw / step) * step;
+    onChange(clamp(snapped, min, max));
+  }
+
+  // 拖拽开始/结束时挂载/卸载全局监听器
+  componentDidUpdate(_prevProps: TapeSliderProps, prevState: { dragging: boolean }) {
+    if (!prevState.dragging && this.state.dragging) {
+      window.addEventListener("pointermove", this.boundWindowMove, {
+        passive: false,
+      });
+      window.addEventListener("pointerup", this.boundWindowUp);
+      window.addEventListener("pointercancel", this.boundWindowUp);
+    } else if (prevState.dragging && !this.state.dragging) {
+      window.removeEventListener("pointermove", this.boundWindowMove);
+      window.removeEventListener("pointerup", this.boundWindowUp);
+      window.removeEventListener("pointercancel", this.boundWindowUp);
+    }
+  }
+
+  componentWillUnmount() {
+    window.removeEventListener("pointermove", this.boundWindowMove);
+    window.removeEventListener("pointerup", this.boundWindowUp);
+    window.removeEventListener("pointercancel", this.boundWindowUp);
+  }
+
+  render() {
+    const {
       value,
       min,
       max,
@@ -47,67 +100,9 @@ export const TapeSlider = forwardRef<TapeSliderHandle, TapeSliderProps>(
       disabled,
       variant = "progress",
       ariaLabel,
-    },
-    ref
-  ) {
-    const trackRef = useRef<HTMLDivElement>(null);
-    const fillRef = useRef<HTMLDivElement>(null);
-    const thumbRef = useRef<HTMLDivElement>(null);
-    const [dragging, setDragging] = useState(false);
-
-    const pct =
-      max > min ? clamp(((value - min) / (max - min)) * 100, 0, 100) : 0;
-
-    const applyPct = useCallback((p: number) => {
-      if (fillRef.current) fillRef.current.style.width = `${p}%`;
-      if (thumbRef.current) thumbRef.current.style.left = `${p}%`;
-    }, []);
-
-    // imperative：rAF 高频更新 DOM，不触发 React 重渲染
-    useImperativeHandle(
-      ref,
-      () => ({
-        setValue: (v: number) => {
-          const p =
-            max > min
-              ? clamp(((v - min) / (max - min)) * 100, 0, 100)
-              : 0;
-          applyPct(p);
-        },
-      }),
-      [min, max, applyPct]
-    );
-
-    const setFromClientX = useCallback(
-      (clientX: number) => {
-        const el = trackRef.current;
-        if (!el) return;
-        const rect = el.getBoundingClientRect();
-        const ratio = clamp((clientX - rect.left) / rect.width, 0, 1);
-        const raw = min + ratio * (max - min);
-        const snapped = Math.round(raw / step) * step;
-        onChange(clamp(snapped, min, max));
-      },
-      [min, max, step, onChange]
-    );
-
-    useEffect(() => {
-      if (!dragging) return;
-      const onMove = (e: PointerEvent) => {
-        e.preventDefault();
-        setFromClientX(e.clientX);
-      };
-      const onUp = () => setDragging(false);
-      window.addEventListener("pointermove", onMove, { passive: false });
-      window.addEventListener("pointerup", onUp);
-      window.addEventListener("pointercancel", onUp);
-      return () => {
-        window.removeEventListener("pointermove", onMove);
-        window.removeEventListener("pointerup", onUp);
-        window.removeEventListener("pointercancel", onUp);
-      };
-    }, [dragging, setFromClientX]);
-
+    } = this.props;
+    const { dragging } = this.state;
+    const pct = max > min ? clamp(((value - min) / (max - min)) * 100, 0, 100) : 0;
     const isProgress = variant === "progress";
 
     return (
@@ -142,12 +137,14 @@ export const TapeSlider = forwardRef<TapeSliderHandle, TapeSliderProps>(
         }}
       >
         <div
-          ref={trackRef}
+          ref={(el) => {
+            this.trackEl = el;
+          }}
           onPointerDown={(e) => {
             if (disabled) return;
             e.preventDefault();
-            setDragging(true);
-            setFromClientX(e.clientX);
+            this.setState({ dragging: true });
+            this.setFromClientX(e.clientX);
           }}
           className={[
             "relative w-full rounded-full",
@@ -158,7 +155,9 @@ export const TapeSlider = forwardRef<TapeSliderHandle, TapeSliderProps>(
           style={{ touchAction: "none" }}
         >
           <div
-            ref={fillRef}
+            ref={(el) => {
+              this.fillEl = el;
+            }}
             className={[
               "absolute inset-y-0 left-0 rounded-full",
               isProgress
@@ -168,7 +167,9 @@ export const TapeSlider = forwardRef<TapeSliderHandle, TapeSliderProps>(
             style={{ width: `${pct}%` }}
           />
           <div
-            ref={thumbRef}
+            ref={(el) => {
+              this.thumbEl = el;
+            }}
             className={[
               "absolute top-1/2 -translate-y-1/2 -translate-x-1/2",
               "rounded-full border-2 border-amber-900/60",
@@ -186,4 +187,4 @@ export const TapeSlider = forwardRef<TapeSliderHandle, TapeSliderProps>(
       </div>
     );
   }
-);
+}

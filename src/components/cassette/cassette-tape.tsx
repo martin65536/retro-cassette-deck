@@ -1,7 +1,5 @@
 "use client";
 
-import { forwardRef, useMemo } from "react";
-
 export type Winding = "forward" | "rewind" | null;
 
 export interface CassetteTapeProps {
@@ -202,48 +200,44 @@ function Reel({ cx, cy, tapeR, reelRef, onPointerDown }: ReelProps) {
   );
 }
 
-export const CassetteTape = forwardRef<SVGSVGElement, CassetteTapeProps>(
-  function CassetteTape(props, svgRef) {
-    const {
-      progress,
-      name,
-      artist,
-      album,
-      playing,
-      winding,
-      hasTape,
-      leftReelRef,
-      rightReelRef,
-      onReelPointerDown,
-    } = props;
+export function CassetteTape(props: CassetteTapeProps) {
+  const {
+    progress,
+    name,
+    artist,
+    album,
+    playing,
+    winding,
+    hasTape,
+    leftReelRef,
+    rightReelRef,
+    onReelPointerDown,
+  } = props;
 
-    const leftTapeR = useMemo(() => tapeRadius(progress, true), [progress]);
-    const rightTapeR = useMemo(() => tapeRadius(progress, false), [progress]);
+  const leftTapeR = tapeRadius(progress, true);
+  const rightTapeR = tapeRadius(progress, false);
 
-    // 磁带带子路径（连接两个卷，经过下方磁头）
-    const tapeBandPath = useMemo(() => {
-      const leftExitX = REEL_CX_LEFT + leftTapeR * 0.45;
-      const leftExitY = REEL_CY + leftTapeR * 0.89;
-      const rightEntryX = REEL_CX_RIGHT - rightTapeR * 0.45;
-      const rightEntryY = REEL_CY + rightTapeR * 0.89;
-      const headLeftX = 180;
-      const headRightX = 240;
-      const headY = 228;
-      return [
-        `M ${leftExitX} ${leftExitY}`,
-        `Q ${leftExitX + 15} ${headY + 6} ${headLeftX} ${headY}`,
-        `L ${headRightX} ${headY}`,
-        `Q ${rightEntryX - 15} ${headY + 6} ${rightEntryX} ${rightEntryY}`,
-      ].join(" ");
-    }, [leftTapeR, rightTapeR]);
+  // 磁带带子路径（连接两个卷，经过下方磁头）
+  const leftExitX = REEL_CX_LEFT + leftTapeR * 0.45;
+  const leftExitY = REEL_CY + leftTapeR * 0.89;
+  const rightEntryX = REEL_CX_RIGHT - rightTapeR * 0.45;
+  const rightEntryY = REEL_CY + rightTapeR * 0.89;
+  const headLeftX = 180;
+  const headRightX = 240;
+  const headY = 228;
+  const tapeBandPath = [
+    `M ${leftExitX} ${leftExitY}`,
+    `Q ${leftExitX + 15} ${headY + 6} ${headLeftX} ${headY}`,
+    `L ${headRightX} ${headY}`,
+    `Q ${rightEntryX - 15} ${headY + 6} ${rightEntryX} ${rightEntryY}`,
+  ].join(" ");
 
-    return (
-      <svg
-        ref={svgRef}
-        viewBox="0 0 420 280"
-        className="w-full h-auto select-none"
-        style={{
-          filter: "drop-shadow(0 18px 32px rgba(60,30,10,0.45))",
+  return (
+    <svg
+      viewBox="0 0 420 280"
+      className="w-full h-auto select-none"
+      style={{
+        filter: "drop-shadow(0 18px 32px rgba(60,30,10,0.45))",
           touchAction: "none",
         }}
       >
@@ -539,4 +533,3 @@ export const CassetteTape = forwardRef<SVGSVGElement, CassetteTapeProps>(
       </svg>
     );
   }
-);
