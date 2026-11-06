@@ -149,7 +149,7 @@ export class TapeSlider extends React.Component<
           className={[
             "relative w-full rounded-full",
             isProgress ? "h-2" : "h-1.5",
-            "bg-amber-900/30 shadow-inner border border-amber-800/30",
+            "bg-stone-950/60 shadow-inner border border-stone-700/40",
           ].join(" ")}
           style={{ touchAction: "none" }}
         >

@@ -88,7 +88,7 @@ export class SourceLoader extends React.Component<
     return (
       <div className="w-full">
         <Tabs defaultValue="upload" className="w-full">
-          <TabsList className="grid w-full grid-cols-3 bg-stone-200/60 dark:bg-stone-800/60">
+          <TabsList className="grid w-full grid-cols-3">
             <TabsTrigger value="upload" className="text-xs sm:text-sm">
               <Upload className="w-3.5 h-3.5 mr-1.5" />
               上传
@@ -121,15 +121,15 @@ export class SourceLoader extends React.Component<
                 "border-2 border-dashed rounded-xl p-6 cursor-pointer",
                 "transition-colors",
                 dragOver
-                  ? "border-orange-500 bg-amber-100"
-                  : "border-amber-800/40 bg-amber-50/50 hover:border-orange-600 hover:bg-amber-100"
+                  ? "border-orange-500 bg-stone-800"
+                  : "border-stone-600/60 bg-stone-900/50 hover:border-orange-600 hover:bg-stone-800/60"
               )}
             >
-              <Upload className="w-7 h-7 text-amber-700" />
-              <p className="text-sm font-medium text-amber-900">
+              <Upload className="w-7 h-7 text-amber-500/70" />
+              <p className="text-sm font-medium text-amber-200">
                 点击或拖拽音频文件到此
               </p>
-              <p className="text-xs text-amber-700/80">
+              <p className="text-xs text-amber-200/50">
                 支持 MP3 / WAV / OGG / FLAC / M4A
               </p>
             </div>
@@ -198,14 +198,14 @@ export class SourceLoader extends React.Component<
                     <Music2 className="w-4 h-4 text-white" />
                   </div>
                   <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium text-amber-900 truncate">
+                    <p className="text-sm font-medium text-amber-100 truncate">
                       {s.name}
                     </p>
-                    <p className="text-[11px] text-amber-700/80 truncate">
+                    <p className="text-[11px] text-amber-200/50 truncate">
                       {s.artist} · {s.album}
                     </p>
                   </div>
-                  <Play className="w-4 h-4 text-amber-700 group-hover:text-orange-600 flex-shrink-0" />
+                  <Play className="w-4 h-4 text-amber-500/70 group-hover:text-orange-400 flex-shrink-0" />
                 </button>
               ))}
             </div>

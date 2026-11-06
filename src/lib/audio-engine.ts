@@ -117,7 +117,15 @@ export class TapeAudioEngine {
     try {
       const res = await fetch(url);
       if (!res.ok) {
-        throw new Error(`HTTP ${res.status}`);
+        // 尝试读取后端返回的 JSON 错误信息
+        let detail = `HTTP ${res.status}`;
+        try {
+          const data = await res.json();
+          if (data?.error) detail = data.error;
+        } catch {
+          /* 非 JSON 响应 */
+        }
+        throw new Error(detail);
       }
       const arr = await res.arrayBuffer();
       this.buffer = await this.ctx!.decodeAudioData(arr);
