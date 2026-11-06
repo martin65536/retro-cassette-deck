@@ -3,30 +3,35 @@ import { NextRequest, NextResponse } from "next/server";
 export const dynamic = "force-dynamic";
 
 /**
- * 网易云音频代理
- * 完整缓冲上游音频（非流式），返回 ArrayBuffer，使前端能 fetch + decodeAudioData
- * 对版权受限歌曲（返回 HTML 404）返回清晰错误
+ * 音频流代理
+ * 接收 ?url=<上游音频URL>，完整缓冲后返回 ArrayBuffer
+ * 校验 content-type 是否为音频，拒绝 HTML 404 页面
  */
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
-  const id = searchParams.get("id");
+  const url = searchParams.get("url");
 
-  if (!id) {
+  if (!url) {
     return NextResponse.json(
-      { ok: false, error: "缺少 id 参数" },
+      { ok: false, error: "缺少 url 参数" },
       { status: 400 }
     );
   }
 
-  const target = `https://music.163.com/song/media/outer/url?id=${id}.mp3`;
+  // 只允许 http/https
+  if (!url.startsWith("http://") && !url.startsWith("https://")) {
+    return NextResponse.json(
+      { ok: false, error: "无效的 url" },
+      { status: 400 }
+    );
+  }
 
   try {
-    const upstream = await fetch(target, {
+    const upstream = await fetch(url, {
       headers: {
         "User-Agent":
           "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
         Referer: "https://music.163.com/",
-        Cookie: "MUSIC_U=0;",
       },
       redirect: "follow",
     });
@@ -41,11 +46,10 @@ export async function GET(request: NextRequest) {
     const ct = upstream.headers.get("content-type") || "";
     const cl = parseInt(upstream.headers.get("content-length") || "0", 10);
 
-    // 完整缓冲 body（非流式，避免流式传输问题）
+    // 完整缓冲
     const buf = await upstream.arrayBuffer();
 
-    // 版权受限：网易云返回 HTML 404 页面（content-type: text/html）
-    // 或返回很小的非音频内容
+    // 拒绝 HTML（版权受限的 404 页面）
     if (ct.includes("text/html") || (cl > 0 && cl < 2048)) {
       return NextResponse.json(
         {
@@ -56,12 +60,36 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // 二次校验：MP3 帧头 / ID3 标签
-    const head = new Uint8Array(buf.slice(0, 3));
-    const isMP3 =
-      (head[0] === 0x49 && head[1] === 0x44 && head[2] === 0x33) || // ID3
-      (head[0] === 0xff && (head[1] & 0xe0) === 0xe0); // MP3 帧同步
-    if (!isMP3) {
+    // 二次校验：检测音频帧头（MP3/ID3/MP4/OGG/FLAC/WAV）
+    // 避免伪装成音频的 HTML
+    const head = new Uint8Array(buf.slice(0, 12));
+    const isAudio =
+      // ID3 (MP3)
+      (head[0] === 0x49 && head[1] === 0x44 && head[2] === 0x33) ||
+      // MP3 帧同步
+      (head[0] === 0xff && (head[1] & 0xe0) === 0xe0) ||
+      // fLaC
+      (head[0] === 0x66 &&
+        head[1] === 0x4c &&
+        head[2] === 0x61 &&
+        head[3] === 0x43) ||
+      // OGG
+      (head[0] === 0x4f &&
+        head[1] === 0x67 &&
+        head[2] === 0x67 &&
+        head[3] === 0x53) ||
+      // RIFF (WAV)
+      (head[0] === 0x52 &&
+        head[1] === 0x49 &&
+        head[2] === 0x46 &&
+        head[3] === 0x46) ||
+      // MP4/M4A (ftyp)
+      (head[4] === 0x66 &&
+        head[5] === 0x74 &&
+        head[6] === 0x79 &&
+        head[7] === 0x70);
+
+    if (!isAudio) {
       return NextResponse.json(
         {
           ok: false,
@@ -71,10 +99,14 @@ export async function GET(request: NextRequest) {
       );
     }
 
+    // 返回音频数据
+    const audioCt = ct.includes("audio") || ct.includes("octet-stream")
+      ? ct
+      : "audio/mpeg";
     return new NextResponse(buf, {
       status: 200,
       headers: {
-        "Content-Type": "audio/mpeg",
+        "Content-Type": audioCt,
         "Cache-Control": "no-store",
         "Content-Length": String(buf.byteLength),
         "Access-Control-Allow-Origin": "*",

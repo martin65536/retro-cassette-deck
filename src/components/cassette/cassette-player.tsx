@@ -614,7 +614,33 @@ export class CassettePlayer extends React.Component<Record<string, never>, Playe
       }
       const song = data.data;
       await this.loadTrack({
-        url: `/api/netease/audio?id=${song.id}`,
+        url: song.audioProxyUrl,
+        name: song.name,
+        artist: song.artist,
+        album: song.album,
+        cover: song.cover,
+      });
+    } catch (e) {
+      this.setState({
+        error: `解析失败：${e instanceof Error ? e.message : "未知错误"}`,
+      });
+    } finally {
+      this.setState({ loading: false });
+    }
+  };
+
+  private handleNetEaseSearch = async (songId: string) => {
+    this.setState({ loading: true, error: null });
+    try {
+      const res = await fetch(`/api/netease/song?id=${songId}`);
+      const data = await res.json();
+      if (!data.ok) {
+        this.setState({ error: data.error || "解析失败" });
+        return;
+      }
+      const song = data.data;
+      await this.loadTrack({
+        url: song.audioProxyUrl,
         name: song.name,
         artist: song.artist,
         album: song.album,
@@ -801,6 +827,7 @@ export class CassettePlayer extends React.Component<Record<string, never>, Playe
           <SourceLoader
             onLoad={this.handleLoad}
             onNetEase={this.handleNetEase}
+            onNetEaseSearch={this.handleNetEaseSearch}
             loading={loading}
             error={error}
           />

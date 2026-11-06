@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { Upload, Music2, Loader2, Link2, Play, AlertCircle } from "lucide-react";
+import { Upload, Music2, Loader2, Link2, Play, AlertCircle, Search } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
@@ -18,6 +18,7 @@ export interface Track {
 interface SourceLoaderProps {
   onLoad: (track: Track, source: "upload" | "sample") => void;
   onNetEase: (input: string) => void;
+  onNetEaseSearch: (songId: string) => void;
   loading: boolean;
   error: string | null;
 }
@@ -47,6 +48,15 @@ const SAMPLES: Track[] = [
 interface SourceLoaderState {
   neteaseInput: string;
   dragOver: boolean;
+  searchQuery: string;
+  searchResults: Array<{
+    id: string;
+    name: string;
+    artist: string;
+    album: string;
+    fee: number;
+  }>;
+  searching: boolean;
 }
 
 export class SourceLoader extends React.Component<
@@ -57,7 +67,13 @@ export class SourceLoader extends React.Component<
 
   constructor(props: SourceLoaderProps) {
     super(props);
-    this.state = { neteaseInput: "", dragOver: false };
+    this.state = {
+      neteaseInput: "",
+      dragOver: false,
+      searchQuery: "",
+      searchResults: [],
+      searching: false,
+    };
   }
 
   private handleFile = (file: File | undefined) => {
@@ -81,9 +97,34 @@ export class SourceLoader extends React.Component<
     this.props.onNetEase(v);
   };
 
+  private handleSearch = async () => {
+    const q = this.state.searchQuery.trim();
+    if (!q) return;
+    this.setState({ searching: true, searchResults: [] });
+    try {
+      const res = await fetch(
+        `/api/netease/search?keywords=${encodeURIComponent(q)}&limit=20`
+      );
+      const data = await res.json();
+      if (data.ok) {
+        this.setState({ searchResults: data.data || [] });
+      } else {
+        this.setState({ searchResults: [] });
+      }
+    } catch {
+      this.setState({ searchResults: [] });
+    } finally {
+      this.setState({ searching: false });
+    }
+  };
+
+  private handleSelectSearchResult = (songId: string) => {
+    this.props.onNetEaseSearch(songId);
+  };
+
   render() {
     const { loading, error } = this.props;
-    const { neteaseInput, dragOver } = this.state;
+    const { neteaseInput, dragOver, searchQuery, searchResults, searching } = this.state;
 
     return (
       <div className="w-full">
@@ -145,37 +186,111 @@ export class SourceLoader extends React.Component<
           </TabsContent>
 
           <TabsContent value="netease" className="mt-3">
-            <div className="space-y-2">
-              <div className="flex gap-2">
-                <div className="relative flex-1">
-                  <Link2 className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-stone-400" />
-                  <Input
-                    value={neteaseInput}
-                    onChange={(e) =>
-                      this.setState({ neteaseInput: e.target.value })
-                    }
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") this.handleNetEase();
-                    }}
-                    placeholder="歌曲ID 或 分享链接"
-                    className="pl-9 bg-white/70 dark:bg-stone-900/70"
-                  />
+            <div className="space-y-3">
+              {/* 搜索区 */}
+              <div>
+                <div className="flex gap-2">
+                  <div className="relative flex-1">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-stone-400" />
+                    <Input
+                      value={searchQuery}
+                      onChange={(e) =>
+                        this.setState({ searchQuery: e.target.value })
+                      }
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") this.handleSearch();
+                      }}
+                      placeholder="搜索歌曲 / 歌手"
+                      className="pl-9"
+                    />
+                  </div>
+                  <Button
+                    onClick={this.handleSearch}
+                    disabled={searching || !searchQuery.trim()}
+                    variant="secondary"
+                  >
+                    {searching ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      "搜索"
+                    )}
+                  </Button>
                 </div>
-                <Button
-                  onClick={this.handleNetEase}
-                  disabled={loading || !neteaseInput.trim()}
-                  className="bg-orange-600 hover:bg-orange-700 text-white"
-                >
-                  {loading ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : (
-                    "解析"
-                  )}
-                </Button>
               </div>
-              <p className="text-[11px] text-stone-500 dark:text-stone-400 leading-relaxed">
-                输入网易云歌曲 ID 或分享链接。由于版权保护，部分歌曲可能无法播放，此时建议改用本地上传。
-              </p>
+
+              {/* 搜索结果 */}
+              {searchResults.length > 0 ? (
+                <div className="grid grid-cols-1 gap-1.5 max-h-56 overflow-y-auto pr-1">
+                  {searchResults.map((s) => (
+                    <button
+                      key={s.id}
+                      type="button"
+                      onClick={() => this.handleSelectSearchResult(s.id)}
+                      disabled={loading}
+                      className={cn(
+                        "flex items-center gap-3 text-left p-2.5 rounded-lg",
+                        "bg-stone-900/60 border border-stone-600/50",
+                        "hover:border-orange-600 hover:bg-stone-800/60",
+                        "transition-colors group disabled:opacity-50"
+                      )}
+                    >
+                      <div className="w-8 h-8 rounded-md bg-gradient-to-br from-orange-500 to-red-700 flex items-center justify-center flex-shrink-0 shadow">
+                        <Music2 className="w-3.5 h-3.5 text-white" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium text-amber-100 truncate">
+                          {s.name}
+                          {s.fee === 1 ? (
+                            <span className="ml-1.5 text-[9px] text-orange-400 align-middle">VIP</span>
+                          ) : null}
+                        </p>
+                        <p className="text-[11px] text-amber-200/50 truncate">
+                          {s.artist} · {s.album}
+                        </p>
+                      </div>
+                      <Play className="w-3.5 h-3.5 text-amber-500/70 group-hover:text-orange-400 flex-shrink-0" />
+                    </button>
+                  ))}
+                </div>
+              ) : searching ? (
+                <div className="text-center py-4 text-xs text-stone-500">
+                  搜索中…
+                </div>
+              ) : null}
+
+              {/* ID 直接解析 */}
+              <div className="pt-2 border-t border-stone-700/40">
+                <p className="text-[10px] text-stone-500 mb-1.5">或直接输入歌曲 ID / 分享链接</p>
+                <div className="flex gap-2">
+                  <div className="relative flex-1">
+                    <Link2 className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-stone-400" />
+                    <Input
+                      value={neteaseInput}
+                      onChange={(e) =>
+                        this.setState({ neteaseInput: e.target.value })
+                      }
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") this.handleNetEase();
+                      }}
+                      placeholder="歌曲ID 或 分享链接"
+                      className="pl-9"
+                    />
+                  </div>
+                  <Button
+                    onClick={this.handleNetEase}
+                    disabled={loading || !neteaseInput.trim()}
+                  >
+                    {loading ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      "解析"
+                    )}
+                  </Button>
+                </div>
+                <p className="text-[11px] text-amber-200/40 leading-relaxed mt-1.5">
+                  由于版权保护，VIP 歌曲及部分歌曲无法获取音频，此时建议改用本地上传。
+                </p>
+              </div>
             </div>
           </TabsContent>
 
