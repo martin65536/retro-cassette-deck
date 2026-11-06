@@ -149,8 +149,7 @@ export class TapeSlider extends React.Component<
           className={[
             "relative w-full rounded-full",
             isProgress ? "h-2" : "h-1.5",
-            "bg-stone-400/40 dark:bg-stone-700/60",
-            "shadow-inner",
+            "bg-amber-900/30 shadow-inner border border-amber-800/30",
           ].join(" ")}
           style={{ touchAction: "none" }}
         >
@@ -162,7 +161,7 @@ export class TapeSlider extends React.Component<
               "absolute inset-y-0 left-0 rounded-full",
               isProgress
                 ? "bg-gradient-to-r from-amber-600 to-orange-500"
-                : "bg-gradient-to-r from-stone-500 to-stone-300",
+                : "bg-gradient-to-r from-amber-700 to-orange-600",
             ].join(" ")}
             style={{ width: `${pct}%` }}
           />
@@ -176,7 +175,7 @@ export class TapeSlider extends React.Component<
               "shadow-md",
               isProgress
                 ? "w-4 h-4 bg-gradient-to-b from-amber-100 to-amber-300"
-                : "w-3.5 h-3.5 bg-gradient-to-b from-stone-100 to-stone-300",
+                : "w-3.5 h-3.5 bg-gradient-to-b from-amber-100 to-amber-400",
               "transition-transform duration-75",
               dragging ? "scale-110" : "group-hover:scale-105",
               "group-focus-within:ring-2 group-focus-within:ring-orange-400/50",

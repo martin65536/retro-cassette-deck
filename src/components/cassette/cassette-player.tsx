@@ -722,7 +722,7 @@ export class CassettePlayer extends React.Component<Record<string, never>, Playe
 
         {/* 拖拽提示 + 实时速率 */}
         {hasTape ? (
-          <div className="mt-3 flex items-center justify-center gap-3 text-xs text-stone-500 dark:text-stone-400 flex-wrap">
+          <div className="mt-3 flex items-center justify-center gap-3 text-xs text-amber-800/80 dark:text-stone-400 flex-wrap">
             <span className="flex items-center gap-1.5">
               <Hand className="w-3.5 h-3.5" />
               <span>
@@ -737,7 +737,7 @@ export class CassettePlayer extends React.Component<Record<string, never>, Playe
         ) : null}
 
         {/* 传输控制 */}
-        <div className="mt-4 p-4 rounded-2xl bg-gradient-to-b from-stone-200 to-stone-300 dark:from-stone-800 dark:to-stone-900 border border-stone-400/40 dark:border-stone-700">
+        <div className="mt-4 p-4 rounded-2xl bg-gradient-to-b from-amber-100 to-amber-200 dark:from-stone-800 dark:to-stone-900 border border-amber-700/40 dark:border-stone-700 shadow-lg">
           <TransportControls
             playing={playing}
             winding={winding}
@@ -760,7 +760,7 @@ export class CassettePlayer extends React.Component<Record<string, never>, Playe
             <div className="flex items-center gap-3">
               <span
                 ref={(el) => { this.currentTimeLabel = el; }}
-                className="text-xs font-mono tabular-nums text-stone-600 dark:text-stone-300 w-10 text-right"
+                className="text-xs font-mono tabular-nums text-amber-900 dark:text-stone-300 w-10 text-right"
               >
                 0:00
               </span>
@@ -775,7 +775,7 @@ export class CassettePlayer extends React.Component<Record<string, never>, Playe
                 variant="progress"
                 ariaLabel="播放进度"
               />
-              <span className="text-xs font-mono tabular-nums text-stone-500 dark:text-stone-400 w-10">
+              <span className="text-xs font-mono tabular-nums text-amber-800/80 dark:text-stone-400 w-10">
                 {formatTime(duration)}
               </span>
             </div>
@@ -787,7 +787,7 @@ export class CassettePlayer extends React.Component<Record<string, never>, Playe
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-8 w-8 text-stone-600 dark:text-stone-300 flex-shrink-0"
+                className="h-8 w-8 text-amber-800 dark:text-stone-300 flex-shrink-0"
                 onClick={() => this.setState({ muted: !muted })}
                 aria-label={muted ? "取消静音" : "静音"}
               >
@@ -804,7 +804,7 @@ export class CassettePlayer extends React.Component<Record<string, never>, Playe
                 variant="volume"
                 ariaLabel="主音量"
               />
-              <span className="text-[10px] font-mono tabular-nums text-stone-500 w-8 text-right">
+              <span className="text-[10px] font-mono tabular-nums text-amber-800/80 w-8 text-right">
                 {Math.round((muted ? 0 : volume) * 100)}
               </span>
             </div>
@@ -842,7 +842,7 @@ export class CassettePlayer extends React.Component<Record<string, never>, Playe
                 variant="volume"
                 ariaLabel="磁带音效音量"
               />
-              <span className="text-[10px] font-mono tabular-nums text-stone-500 w-8 text-right">
+              <span className="text-[10px] font-mono tabular-nums text-amber-800/80 w-8 text-right">
                 {soundsOn ? Math.round(sfxVolume * 100) : 0}
               </span>
             </div>
@@ -850,10 +850,10 @@ export class CassettePlayer extends React.Component<Record<string, never>, Playe
         </div>
 
         {/* 音频源加载 */}
-        <div className="mt-4 p-4 rounded-2xl bg-white/70 dark:bg-stone-900/70 border border-stone-300/60 dark:border-stone-700/60 backdrop-blur">
+        <div className="mt-4 p-4 rounded-2xl bg-amber-50/80 dark:bg-stone-900/70 border border-amber-700/40 dark:border-stone-700/60 backdrop-blur">
           <div className="flex items-center gap-2 mb-3">
             <div className="h-4 w-1 bg-orange-600 rounded-full" />
-            <h3 className="text-sm font-semibold text-stone-700 dark:text-stone-200">
+            <h3 className="text-sm font-semibold text-amber-900 dark:text-stone-200">
               装入磁带
             </h3>
           </div>

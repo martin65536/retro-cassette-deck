@@ -72,8 +72,8 @@ class MechButton extends React.Component<MechButtonProps> {
           "transition-all duration-100",
           "border-b-[4px] active:border-b-0 active:translate-y-[4px]",
           active
-            ? "border-b-0 translate-y-[4px] bg-amber-700 border-amber-900"
-            : "bg-gradient-to-b from-stone-600 to-stone-800 border-stone-950",
+            ? "border-b-0 translate-y-[4px] bg-gradient-to-b from-orange-500 to-orange-700 border-orange-900"
+            : "bg-gradient-to-b from-amber-800 to-stone-900 border-stone-950",
           disabled ? "opacity-40 cursor-not-allowed" : "cursor-pointer",
           "shadow-lg shadow-stone-950/40",
         ].join(" ")}
@@ -86,8 +86,8 @@ class MechButton extends React.Component<MechButtonProps> {
         <Icon
           className={[
             "w-5 h-5 sm:w-6 sm:h-6",
-            accent ? "text-orange-300" : "text-stone-100",
-            active ? "text-orange-200" : "",
+            accent ? "text-orange-200" : "text-amber-100",
+            active ? "text-amber-50" : "",
           ].join(" ")}
           strokeWidth={2.2}
         />
@@ -95,8 +95,8 @@ class MechButton extends React.Component<MechButtonProps> {
           className={[
             "text-[9px] font-bold tracking-wider",
             "font-mono",
-            accent ? "text-orange-300" : "text-stone-300",
-            active ? "text-orange-200" : "",
+            accent ? "text-orange-200" : "text-amber-200/90",
+            active ? "text-amber-50" : "",
           ].join(" ")}
         >
           {label}

@@ -10,7 +10,7 @@ type TabsListProps = React.ComponentProps<typeof TabsPrimitive.List>
 type TabsTriggerProps = React.ComponentProps<typeof TabsPrimitive.Trigger>
 type TabsContentProps = React.ComponentProps<typeof TabsPrimitive.Content>
 
-/** Tabs —— React 类组件（无 hook） */
+/** Tabs —— React 类组件 · 复古暖色面板 */
 class Tabs extends React.Component<TabsProps> {
   render() {
     const { className, ...props } = this.props
@@ -31,7 +31,10 @@ class TabsList extends React.Component<TabsListProps> {
       <TabsPrimitive.List
         data-slot="tabs-list"
         className={cn(
-          "bg-muted text-muted-foreground inline-flex h-9 w-fit items-center justify-center rounded-lg p-[3px]",
+          // 暖棕凹陷底
+          "inline-flex h-9 w-full items-center justify-center rounded-lg p-[3px]",
+          "bg-gradient-to-b from-amber-200/60 to-amber-400/40",
+          "shadow-inner border border-amber-700/30",
           className
         )}
         {...props}
@@ -47,7 +50,17 @@ class TabsTrigger extends React.Component<TabsTriggerProps> {
       <TabsPrimitive.Trigger
         data-slot="tabs-trigger"
         className={cn(
-          "data-[state=active]:bg-background dark:data-[state=active]:text-foreground focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:outline-ring dark:data-[state=active]:border-input dark:data-[state=active]:bg-input/30 text-foreground dark:text-muted-foreground inline-flex h-[calc(100%-1px)] flex-1 items-center justify-center gap-1.5 rounded-md border border-transparent px-2 py-1 text-sm font-medium whitespace-nowrap transition-[color,box-shadow] focus-visible:ring-[3px] focus-visible:outline-1 disabled:pointer-events-none disabled:opacity-50 data-[state=active]:shadow-sm [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+          "inline-flex h-[calc(100%-1px)] flex-1 items-center justify-center gap-1.5 rounded-md px-2 py-1 text-sm font-medium whitespace-nowrap transition-all",
+          // 未选中：透明，暖棕文字
+          "text-amber-800/80 dark:text-stone-300",
+          "hover:text-amber-950 dark:hover:text-amber-200 hover:bg-amber-100/50",
+          // 选中：奶油底 + 暖橙点缀
+          "data-[state=active]:bg-gradient-to-b data-[state=active]:from-amber-50 data-[state=active]:to-amber-100",
+          "data-[state=active]:text-orange-800 data-[state=active]:shadow-sm",
+          "data-[state=active]:border data-[state=active]:border-amber-700/40",
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-400/40",
+          "disabled:pointer-events-none disabled:opacity-50",
+          "[&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
           className
         )}
         {...props}

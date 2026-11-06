@@ -121,15 +121,15 @@ export class SourceLoader extends React.Component<
                 "border-2 border-dashed rounded-xl p-6 cursor-pointer",
                 "transition-colors",
                 dragOver
-                  ? "border-orange-500 bg-orange-50 dark:bg-orange-950/30"
-                  : "border-stone-400/60 hover:border-orange-400 hover:bg-stone-50 dark:hover:bg-stone-800/40"
+                  ? "border-orange-500 bg-amber-100"
+                  : "border-amber-800/40 bg-amber-50/50 hover:border-orange-600 hover:bg-amber-100"
               )}
             >
-              <Upload className="w-7 h-7 text-stone-500 dark:text-stone-400" />
-              <p className="text-sm font-medium text-stone-700 dark:text-stone-200">
+              <Upload className="w-7 h-7 text-amber-700" />
+              <p className="text-sm font-medium text-amber-900">
                 点击或拖拽音频文件到此
               </p>
-              <p className="text-xs text-stone-500 dark:text-stone-400">
+              <p className="text-xs text-amber-700/80">
                 支持 MP3 / WAV / OGG / FLAC / M4A
               </p>
             </div>
@@ -188,8 +188,9 @@ export class SourceLoader extends React.Component<
                   onClick={() => this.props.onLoad(s, "sample")}
                   className={cn(
                     "flex items-center gap-3 text-left p-3 rounded-lg",
-                    "border border-stone-300/60 dark:border-stone-700/60",
-                    "hover:border-orange-400 hover:bg-orange-50 dark:hover:bg-orange-950/20",
+                    // 奶油底 + 棕褐边，hover 加深暖色
+                    "bg-amber-50/80 border border-amber-800/40",
+                    "hover:border-orange-600 hover:bg-amber-100",
                     "transition-colors group"
                   )}
                 >
@@ -197,18 +198,18 @@ export class SourceLoader extends React.Component<
                     <Music2 className="w-4 h-4 text-white" />
                   </div>
                   <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium text-stone-800 dark:text-stone-100 truncate">
+                    <p className="text-sm font-medium text-amber-900 truncate">
                       {s.name}
                     </p>
-                    <p className="text-[11px] text-stone-500 dark:text-stone-400 truncate">
+                    <p className="text-[11px] text-amber-700/80 truncate">
                       {s.artist} · {s.album}
                     </p>
                   </div>
-                  <Play className="w-4 h-4 text-stone-400 group-hover:text-orange-600 flex-shrink-0" />
+                  <Play className="w-4 h-4 text-amber-700 group-hover:text-orange-600 flex-shrink-0" />
                 </button>
               ))}
             </div>
-            <p className="text-[11px] text-stone-500 dark:text-stone-400 mt-2">
+            <p className="text-[11px] text-amber-700/80 mt-2">
               示例曲目来自 SoundHelix（免版权），用于快速体验功能。
             </p>
           </TabsContent>
