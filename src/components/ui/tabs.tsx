@@ -31,9 +31,8 @@ class TabsList extends React.Component<TabsListProps> {
       <TabsPrimitive.List
         data-slot="tabs-list"
         className={cn(
-          "inline-flex h-9 w-full items-center justify-center rounded-lg p-[3px]",
-          "bg-gradient-to-b from-stone-800 to-stone-900",
-          "shadow-inner border border-stone-700/60",
+          "inline-flex h-9 w-full items-center justify-center rounded-none p-[3px]",
+          "bg-white border border-black",
           className
         )}
         {...props}
@@ -49,13 +48,11 @@ class TabsTrigger extends React.Component<TabsTriggerProps> {
       <TabsPrimitive.Trigger
         data-slot="tabs-trigger"
         className={cn(
-          "inline-flex h-[calc(100%-1px)] flex-1 items-center justify-center gap-1.5 rounded-md px-2 py-1 text-sm font-medium whitespace-nowrap transition-all",
-          "text-stone-400",
-          "hover:text-amber-200 hover:bg-stone-800",
-          "data-[state=active]:bg-gradient-to-b data-[state=active]:from-stone-700 data-[state=active]:to-stone-800",
-          "data-[state=active]:text-amber-300 data-[state=active]:shadow-sm",
-          "data-[state=active]:border data-[state=active]:border-orange-700/40",
-          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-400/40",
+          "inline-flex h-[calc(100%-1px)] flex-1 items-center justify-center gap-1.5 rounded-none px-2 py-1 text-sm font-medium whitespace-nowrap transition-all",
+          "text-gray-500",
+          "hover:text-black hover:bg-gray-100",
+          "data-[state=active]:bg-black data-[state=active]:text-white",
+          "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-black",
           "disabled:pointer-events-none disabled:opacity-50",
           "[&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
           className

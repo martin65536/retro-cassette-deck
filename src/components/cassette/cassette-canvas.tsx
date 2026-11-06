@@ -23,41 +23,14 @@ interface CassetteCanvasProps {
 }
 
 // 逻辑画布尺寸
-const W = 440;
+const W = 460;
 const H = 300;
 
 // 带卷几何
-const REEL_L = { x: 135, y: 175, r: 56 };
-const REEL_R = { x: 305, y: 175, r: 56 };
-const TAPE_MAX_R = 44;
-const TAPE_MIN_R = 13;
-
-// 配色（新风格：暗色碳纤维 + 铜橙）
-const C = {
-  shellA: "#2b2b30",
-  shellB: "#161619",
-  shellEdge: "#08080a",
-  shellHi: "#3e3e44",
-  window: "#0d0d0f",
-  windowEdge: "#3a3a40",
-  reelBase: "#1c1c20",
-  reelTeeth: "#4a4a52",
-  tape: "#241408",
-  tapeRing: "#3a2410",
-  hub: "#b87333",
-  hubDark: "#6a4220",
-  label: "#3a2a1c",
-  labelEdge: "#6a4a2a",
-  accent: "#d97706",
-  accentBright: "#f59e0b",
-  ledOn: "#f59e0b",
-  ledOff: "#3a2a1a",
-  text: "#e8dcc8",
-  textDim: "#9a8a6a",
-  textAccent: "#e8a050",
-  screw: "#6a6a70",
-  screwSlot: "#2a2a2e",
-};
+const REEL_L = { x: 140, y: 172, r: 54 };
+const REEL_R = { x: 320, y: 172, r: 54 };
+const TAPE_MAX_R = 42;
+const TAPE_MIN_R = 12;
 
 const clamp = (v: number, lo: number, hi: number) =>
   Math.max(lo, Math.min(hi, v));
@@ -80,8 +53,10 @@ function tapeRadius(progress: number, isLeft: boolean) {
 function truncText(
   ctx: CanvasRenderingContext2D,
   text: string,
-  maxWidth: number
+  maxWidth: number,
+  font: string
 ) {
+  ctx.font = font;
   if (ctx.measureText(text).width <= maxWidth) return text;
   let t = text;
   while (t.length > 1 && ctx.measureText(t + "…").width > maxWidth) {
@@ -91,17 +66,24 @@ function truncText(
 }
 
 /**
- * Canvas 磁带渲染器（无 DOM SVG，全部 Canvas 2D 绘制）
- * - 父组件持有 ref，每帧调用 draw(state) 更新画面
- * - 内置带卷拖拽手势：pointerdown 命中检测，pointermove 计算角度增量
- * - touch-action:none 阻止下拉刷新
+ * Canvas 磁带渲染器（黑白极简，精致细节）
+ *
+ * 细节清单：
+ * - 外壳：纯白底 + 1px 黑边，顶/底两条细线分隔
+ * - 标签区：左侧黑色色块 + 歌名/艺术家/专辑三行排版 + 右侧 SIDE A 标记
+ * - 带卷窗口：黑色凹陷，带内阴影
+ * - 带卷：外环齿轮齿（8个）、内辐条（6根）、磁带卷（同心圆纹理 + 径向纹理）、六角轴心
+ * - 磁带带子：S形曲线连接两卷，经磁头窗口
+ * - 磁头窗口：底部黑色条带 + 读头指示
+ * - 螺丝：四角十字螺丝
+ * - 状态灯：PLAY/FF/REW 指示
+ * - 底部品牌字
  */
 export class CassetteCanvas extends React.Component<CassetteCanvasProps> {
   private canvasEl: HTMLCanvasElement | null = null;
   private ctx: CanvasRenderingContext2D | null = null;
   private dpr = 1;
 
-  // 拖拽状态
   private dragging = false;
   private dragSide: "left" | "right" = "right";
   private dragCenter = { x: 0, y: 0 };
@@ -123,7 +105,6 @@ export class CassetteCanvas extends React.Component<CassetteCanvasProps> {
       this.canvasEl.height = H * this.dpr;
       this.ctx = this.canvasEl.getContext("2d");
       if (this.ctx) this.ctx.scale(this.dpr, this.dpr);
-      // 初始绘制
       this.draw({
         leftAngle: 0,
         rightAngle: 0,
@@ -143,7 +124,6 @@ export class CassetteCanvas extends React.Component<CassetteCanvasProps> {
     window.removeEventListener("pointercancel", this.boundUp);
   }
 
-  /** 父组件每帧调用，传入当前状态绘制 */
   draw(state: CassetteDrawState) {
     const ctx = this.ctx;
     if (!ctx) return;
@@ -183,159 +163,184 @@ export class CassetteCanvas extends React.Component<CassetteCanvasProps> {
     ctx.closePath();
   }
 
+  // ===== 外壳：纯白底 + 黑边 + 顶底细线 =====
   private drawShell(ctx: CanvasRenderingContext2D) {
-    const g = ctx.createLinearGradient(0, 8, 0, H - 8);
-    g.addColorStop(0, C.shellA);
-    g.addColorStop(1, C.shellB);
-    ctx.fillStyle = g;
-    this.roundRect(ctx, 6, 6, W - 12, H - 12, 16);
+    // 主体白底，极小圆角（2px）
+    ctx.fillStyle = "#fafafa";
+    this.roundRect(ctx, 4, 4, W - 8, H - 8, 2);
     ctx.fill();
-    ctx.strokeStyle = C.shellEdge;
-    ctx.lineWidth = 2;
-    ctx.stroke();
-    // 内边高光
-    ctx.strokeStyle = C.shellHi;
+    // 外黑边 1px
+    ctx.strokeStyle = "#0a0a0a";
     ctx.lineWidth = 1;
-    this.roundRect(ctx, 14, 14, W - 28, H - 28, 11);
+    this.roundRect(ctx, 4, 4, W - 8, H - 8, 2);
+    ctx.stroke();
+    // 顶部细线（标签上分隔）
+    ctx.beginPath();
+    ctx.moveTo(4, 100);
+    ctx.lineTo(W - 4, 100);
+    ctx.stroke();
+    // 底部细线（磁头窗口上分隔）
+    ctx.beginPath();
+    ctx.moveTo(4, 244);
+    ctx.lineTo(W - 4, 244);
     ctx.stroke();
   }
 
+  // ===== 四角十字螺丝 =====
   private drawScrews(ctx: CanvasRenderingContext2D) {
     const pos = [
-      [24, 24],
-      [W - 24, 24],
-      [24, H - 24],
-      [W - 24, H - 24],
+      [16, 16],
+      [W - 16, 16],
+      [16, H - 16],
+      [W - 16, H - 16],
     ];
     for (const [x, y] of pos) {
-      ctx.fillStyle = C.screw;
+      // 螺丝圆
+      ctx.fillStyle = "#e0e0e0";
       ctx.beginPath();
-      ctx.arc(x, y, 4, 0, Math.PI * 2);
+      ctx.arc(x, y, 3.5, 0, Math.PI * 2);
       ctx.fill();
-      ctx.strokeStyle = C.screwSlot;
-      ctx.lineWidth = 1.2;
+      ctx.strokeStyle = "#999";
+      ctx.lineWidth = 0.5;
+      ctx.stroke();
+      // 十字槽
+      ctx.strokeStyle = "#666";
+      ctx.lineWidth = 1;
       ctx.beginPath();
-      ctx.moveTo(x - 2.5, y);
-      ctx.lineTo(x + 2.5, y);
+      ctx.moveTo(x - 2, y);
+      ctx.lineTo(x + 2, y);
+      ctx.moveTo(x, y - 2);
+      ctx.lineTo(x, y + 2);
       ctx.stroke();
     }
   }
 
+  // ===== 标签区 =====
   private drawLabel(
     ctx: CanvasRenderingContext2D,
     state: CassetteDrawState
   ) {
-    // 标签纸（暗铜色）
-    const g = ctx.createLinearGradient(0, 30, 0, 100);
-    g.addColorStop(0, "#4a3422");
-    g.addColorStop(1, C.label);
-    ctx.fillStyle = g;
-    this.roundRect(ctx, 30, 30, W - 60, 70, 4);
-    ctx.fill();
-    ctx.strokeStyle = C.labelEdge;
-    ctx.lineWidth = 1;
-    ctx.stroke();
-    // 左侧橙色色带
-    ctx.fillStyle = C.accent;
-    ctx.fillRect(30, 30, 6, 70);
-    ctx.fillStyle = "rgba(217,119,6,0.4)";
-    ctx.fillRect(36, 30, 3, 70);
+    // 左侧黑色色块
+    ctx.fillStyle = "#0a0a0a";
+    ctx.fillRect(14, 110, 5, 84);
 
-    // 歌名
-    ctx.fillStyle = C.text;
-    ctx.font = "700 16px ui-monospace, 'Courier New', monospace";
+    // 歌名（大号粗体）
+    ctx.fillStyle = "#0a0a0a";
     ctx.textBaseline = "alphabetic";
+    ctx.textAlign = "left";
     const name = state.hasTape
-      ? truncText(ctx, state.name, 270)
+      ? truncText(ctx, state.name, 250, "700 17px ui-monospace, 'Courier New', monospace")
       : "—— NO TAPE ——";
-    ctx.fillText(name, 50, 54);
+    ctx.font = "700 17px ui-monospace, 'Courier New', monospace";
+    ctx.fillText(name, 28, 132);
 
-    // 艺术家
-    ctx.fillStyle = C.textDim;
+    // 艺术家（中号）
+    ctx.fillStyle = "#555";
     ctx.font = "11px ui-monospace, 'Courier New', monospace";
     const artist = state.hasTape
-      ? truncText(ctx, state.artist.toUpperCase(), 270)
+      ? truncText(ctx, state.artist.toUpperCase(), 250, "11px ui-monospace, 'Courier New', monospace")
       : "INSERT A CASSETTE TO PLAY";
-    ctx.fillText(artist, 50, 72);
+    ctx.fillText(artist, 28, 150);
 
-    // 专辑
+    // 专辑（小号灰）
     if (state.hasTape && state.album) {
-      ctx.fillStyle = "#7a6a4a";
+      ctx.fillStyle = "#999";
       ctx.font = "9px ui-monospace, 'Courier New', monospace";
-      ctx.fillText(truncText(ctx, state.album, 270), 50, 86);
+      ctx.fillText(
+        truncText(ctx, state.album, 250, "9px ui-monospace, 'Courier New', monospace"),
+        28,
+        165
+      );
     }
 
-    // 右侧 SIDE A
-    ctx.fillStyle = C.textAccent;
-    ctx.font = "700 11px ui-monospace, 'Courier New', monospace";
-    ctx.textAlign = "right";
-    ctx.fillText("SIDE A", W - 50, 50);
-    ctx.fillStyle = C.textDim;
-    ctx.font = "8px ui-monospace, 'Courier New', monospace";
-    ctx.fillText("90 MIN · CHROME", W - 50, 62);
+    // 右侧 SIDE A 标记（黑底白字方块）
+    const sx = W - 80;
+    const sy = 120;
+    ctx.fillStyle = "#0a0a0a";
+    ctx.fillRect(sx, sy, 52, 14);
+    ctx.fillStyle = "#fafafa";
+    ctx.font = "700 9px ui-monospace, 'Courier New', monospace";
+    ctx.textAlign = "center";
+    ctx.fillText("SIDE A", sx + 26, sy + 10);
     ctx.textAlign = "left";
+
+    // 下方规格标记
+    ctx.fillStyle = "#999";
+    ctx.font = "8px ui-monospace, 'Courier New', monospace";
+    ctx.fillText("90 MIN · TYPE II CHROME", sx, 186);
   }
 
+  // ===== 带卷窗口（黑色凹陷）=====
   private drawWindow(ctx: CanvasRenderingContext2D) {
-    const g = ctx.createRadialGradient(W / 2, 165, 40, W / 2, 165, 170);
-    g.addColorStop(0, "#1a1a1e");
-    g.addColorStop(1, C.window);
-    ctx.fillStyle = g;
-    this.roundRect(ctx, 55, 115, W - 110, 120, 60);
+    // 黑色凹陷窗口
+    ctx.fillStyle = "#0a0a0a";
+    this.roundRect(ctx, 56, 108, W - 112, 132, 1);
     ctx.fill();
-    ctx.strokeStyle = C.windowEdge;
-    ctx.lineWidth = 2;
+    // 内边高光（上沿）
+    ctx.strokeStyle = "#2a2a2a";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(57, 109);
+    ctx.lineTo(W - 57, 109);
     ctx.stroke();
   }
 
   private drawEmptyReels(ctx: CanvasRenderingContext2D) {
     for (const reel of [REEL_L, REEL_R]) {
-      ctx.strokeStyle = "#3a2a1f";
+      // 虚线圆
+      ctx.strokeStyle = "#444";
       ctx.lineWidth = 1;
       ctx.setLineDash([3, 3]);
       ctx.beginPath();
       ctx.arc(reel.x, reel.y, reel.r, 0, Math.PI * 2);
       ctx.stroke();
       ctx.setLineDash([]);
-      ctx.fillStyle = C.hubDark;
+      // 中心轴
+      ctx.fillStyle = "#333";
       ctx.beginPath();
-      ctx.arc(reel.x, reel.y, 7, 0, Math.PI * 2);
+      ctx.arc(reel.x, reel.y, 8, 0, Math.PI * 2);
       ctx.fill();
-      ctx.fillStyle = C.hub;
+      ctx.fillStyle = "#888";
       ctx.beginPath();
       ctx.arc(reel.x, reel.y, 4, 0, Math.PI * 2);
       ctx.fill();
     }
   }
 
+  // ===== 磁带带子（S 形曲线经磁头）=====
   private drawTapeBand(
     ctx: CanvasRenderingContext2D,
     lt: number,
     rt: number
   ) {
-    const lx = REEL_L.x + lt * 0.45;
-    const ly = REEL_L.y + lt * 0.89;
-    const rx = REEL_R.x - rt * 0.45;
-    const ry = REEL_R.y + rt * 0.89;
-    const hl = 190;
-    const hr = 250;
-    const hy = 243;
+    const lx = REEL_L.x + lt * 0.4;
+    const ly = REEL_L.y + lt * 0.92;
+    const rx = REEL_R.x - rt * 0.4;
+    const ry = REEL_R.y + rt * 0.92;
+    const hl = 195;
+    const hr = 265;
+    const hy = 232;
     ctx.beginPath();
     ctx.moveTo(lx, ly);
-    ctx.quadraticCurveTo(lx + 15, hy + 6, hl, hy);
+    ctx.quadraticCurveTo(lx + 12, hy + 4, hl, hy);
     ctx.lineTo(hr, hy);
-    ctx.quadraticCurveTo(rx - 15, hy + 6, rx, ry);
-    ctx.strokeStyle = C.tape;
-    ctx.lineWidth = 6;
+    ctx.quadraticCurveTo(rx - 12, hy + 4, rx, ry);
+    ctx.strokeStyle = "#1a1a1a";
+    ctx.lineWidth = 5;
     ctx.lineCap = "round";
     ctx.stroke();
-    ctx.strokeStyle = C.tapeRing;
-    ctx.lineWidth = 0.6;
-    ctx.globalAlpha = 0.5;
+    // 高光线
+    ctx.strokeStyle = "#3a3a3a";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(lx, ly - 1);
+    ctx.quadraticCurveTo(lx + 12, hy + 3, hl, hy - 1);
+    ctx.lineTo(hr, hy - 1);
+    ctx.quadraticCurveTo(rx - 12, hy + 3, rx, ry - 1);
     ctx.stroke();
-    ctx.globalAlpha = 1;
   }
 
+  // ===== 单个带卷（精致细节）=====
   private drawReel(
     ctx: CanvasRenderingContext2D,
     reel: { x: number; y: number; r: number },
@@ -346,134 +351,141 @@ export class CassetteCanvas extends React.Component<CassetteCanvasProps> {
     ctx.translate(reel.x, reel.y);
     ctx.rotate((angle * Math.PI) / 180);
 
-    // 主圆盘
-    ctx.fillStyle = C.reelBase;
+    // 外环底（深灰）
+    ctx.fillStyle = "#1a1a1a";
     ctx.beginPath();
     ctx.arc(0, 0, reel.r, 0, Math.PI * 2);
     ctx.fill();
-    ctx.strokeStyle = C.reelTeeth;
-    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = "#3a3a3a";
+    ctx.lineWidth = 1;
     ctx.stroke();
 
-    // 6 个齿轮齿
-    for (let i = 0; i < 6; i++) {
+    // 8 个外缘齿轮齿
+    ctx.fillStyle = "#2a2a2a";
+    for (let i = 0; i < 8; i++) {
       ctx.save();
-      ctx.rotate((i * 60 * Math.PI) / 180);
-      ctx.fillStyle = C.reelTeeth;
-      ctx.fillRect(-3.5, -reel.r - 5, 7, 9);
+      ctx.rotate((i * 45 * Math.PI) / 180);
+      this.roundRect(ctx, -2.5, -reel.r - 3, 5, 6, 0.5);
+      ctx.fill();
       ctx.restore();
     }
 
-    // 内圈装饰环
-    ctx.strokeStyle = C.reelTeeth;
-    ctx.lineWidth = 1;
-    ctx.globalAlpha = 0.6;
+    // 外环内圈线
+    ctx.strokeStyle = "#444";
+    ctx.lineWidth = 0.5;
     ctx.beginPath();
-    ctx.arc(0, 0, TAPE_MAX_R + 4, 0, Math.PI * 2);
+    ctx.arc(0, 0, reel.r - 4, 0, Math.PI * 2);
     ctx.stroke();
-    ctx.globalAlpha = 1;
 
-    // 磁带缠绕
-    ctx.fillStyle = C.tape;
+    // 磁带卷（深色圆盘）
+    ctx.fillStyle = "#0d0d0d";
     ctx.beginPath();
     ctx.arc(0, 0, tapeR, 0, Math.PI * 2);
     ctx.fill();
 
-    // 同心圆纹理
-    if (tapeR > TAPE_MIN_R + 2) {
-      ctx.strokeStyle = C.tapeRing;
-      ctx.lineWidth = 0.4;
-      ctx.globalAlpha = 0.5;
-      for (const p of [0.35, 0.55, 0.72, 0.86]) {
-        ctx.beginPath();
-        ctx.arc(0, 0, TAPE_MIN_R + (tapeR - TAPE_MIN_R) * p, 0, Math.PI * 2);
-        ctx.stroke();
+    // 磁带同心圆纹理（细线）
+    if (tapeR > TAPE_MIN_R + 1) {
+      ctx.strokeStyle = "#222";
+      ctx.lineWidth = 0.3;
+      const rings = Math.floor((tapeR - TAPE_MIN_R) / 2);
+      for (let i = 1; i <= rings; i++) {
+        const r = TAPE_MIN_R + i * 2;
+        if (r < tapeR) {
+          ctx.beginPath();
+          ctx.arc(0, 0, r, 0, Math.PI * 2);
+          ctx.stroke();
+        }
       }
-      ctx.globalAlpha = 1;
     }
 
-    // 径向高光
-    if (tapeR > TAPE_MIN_R + 4) {
-      ctx.strokeStyle = C.tapeRing;
-      ctx.lineWidth = 0.3;
-      ctx.globalAlpha = 0.25;
+    // 径向辐条纹理（12根，淡）
+    if (tapeR > TAPE_MIN_R + 3) {
+      ctx.strokeStyle = "#1f1f1f";
+      ctx.lineWidth = 0.25;
       for (let i = 0; i < 12; i++) {
         const a = (i * 30 * Math.PI) / 180;
         ctx.beginPath();
         ctx.moveTo(Math.cos(a) * TAPE_MIN_R, Math.sin(a) * TAPE_MIN_R);
-        ctx.lineTo(Math.cos(a) * (tapeR - 1), Math.sin(a) * (tapeR - 1));
+        ctx.lineTo(Math.cos(a) * (tapeR - 0.5), Math.sin(a) * (tapeR - 0.5));
         ctx.stroke();
       }
-      ctx.globalAlpha = 1;
     }
 
-    // 中心轴孔
-    ctx.fillStyle = "#0d0d0f";
-    ctx.beginPath();
-    ctx.arc(0, 0, 7, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = C.hub;
-    ctx.beginPath();
-    ctx.arc(0, 0, 4, 0, Math.PI * 2);
-    ctx.fill();
-    // 六角花键
-    ctx.strokeStyle = "#0d0d0f";
-    ctx.lineWidth = 1;
+    // 6 根辐条（从中心到外环，白色细线，可见旋转）
+    ctx.strokeStyle = "#666";
+    ctx.lineWidth = 1.2;
     for (let i = 0; i < 6; i++) {
       const a = (i * 60 * Math.PI) / 180;
       ctx.beginPath();
-      ctx.moveTo(Math.cos(a) * 2, Math.sin(a) * 2);
-      ctx.lineTo(Math.cos(a) * 6.5, Math.sin(a) * 6.5);
+      ctx.moveTo(Math.cos(a) * 9, Math.sin(a) * 9);
+      ctx.lineTo(Math.cos(a) * (reel.r - 6), Math.sin(a) * (reel.r - 6));
       ctx.stroke();
     }
+
+    // 中心轴孔（六角）
+    ctx.fillStyle = "#000";
+    ctx.beginPath();
+    ctx.arc(0, 0, 9, 0, Math.PI * 2);
+    ctx.fill();
+    // 六角花键
+    ctx.fillStyle = "#4a4a4a";
+    ctx.beginPath();
+    for (let i = 0; i < 6; i++) {
+      const a = (i * 60 * Math.PI) / 180;
+      const px = Math.cos(a) * 5;
+      const py = Math.sin(a) * 5;
+      if (i === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+    ctx.fill();
+    // 中心点
+    ctx.fillStyle = "#888";
+    ctx.beginPath();
+    ctx.arc(0, 0, 2, 0, Math.PI * 2);
+    ctx.fill();
 
     ctx.restore();
   }
 
+  // ===== 磁头窗口 =====
   private drawHeadWindow(
     ctx: CanvasRenderingContext2D,
     state: CassetteDrawState
   ) {
-    ctx.fillStyle = C.window;
-    this.roundRect(ctx, 175, 225, 90, 20, 3);
+    // 黑色磁头条带
+    ctx.fillStyle = "#0a0a0a";
+    this.roundRect(ctx, 185, 248, 90, 18, 1);
     ctx.fill();
-    ctx.strokeStyle = C.windowEdge;
-    ctx.lineWidth = 1;
+    ctx.strokeStyle = "#333";
+    ctx.lineWidth = 0.5;
     ctx.stroke();
-    // 磁头
-    ctx.fillStyle = "#5a4030";
-    ctx.fillRect(185, 232, 70, 6);
-    // 读头指示
-    ctx.fillStyle = state.playing ? C.accentBright : "#5a4030";
-    ctx.globalAlpha = state.playing ? 0.9 : 0.4;
-    ctx.fillRect(205, 234, 30, 2);
-    ctx.globalAlpha = 1;
+    // 磁头读头
+    ctx.fillStyle = "#444";
+    ctx.fillRect(195, 254, 70, 5);
+    // 读头指示（播放时白条）
+    ctx.fillStyle = state.playing ? "#fafafa" : "#333";
+    ctx.fillRect(210, 255, 40, 2);
   }
 
+  // ===== 状态灯 =====
   private drawStatusLED(
     ctx: CanvasRenderingContext2D,
     state: CassetteDrawState
   ) {
-    const x = 42;
-    const y = 248;
-    // 状态灯
+    const x = 24;
+    const y = 258;
+    // 灯
     if (state.playing || state.winding) {
-      // 发光
-      const glow = ctx.createRadialGradient(x, y, 0, x, y, 10);
-      glow.addColorStop(0, state.winding ? "#fbbf24" : C.ledOn);
-      glow.addColorStop(1, "rgba(245,158,11,0)");
-      ctx.fillStyle = glow;
-      ctx.fillRect(x - 10, y - 10, 20, 20);
-      ctx.fillStyle = state.winding ? "#fbbf24" : C.ledOn;
+      ctx.fillStyle = "#0a0a0a";
     } else {
-      ctx.fillStyle = C.ledOff;
+      ctx.fillStyle = "#444";
     }
     ctx.beginPath();
     ctx.arc(x, y, 3, 0, Math.PI * 2);
     ctx.fill();
-
     // 状态文字
-    ctx.fillStyle = C.textDim;
+    ctx.fillStyle = "#666";
     ctx.font = "8px ui-monospace, 'Courier New', monospace";
     const st = state.winding === "forward"
       ? "FF"
@@ -482,18 +494,22 @@ export class CassetteCanvas extends React.Component<CassetteCanvasProps> {
         : state.playing
           ? "PLAY"
           : "STOP";
-    ctx.fillText(st, 50, 251);
+    ctx.fillText(st, 32, 261);
   }
 
   private drawBrandText(ctx: CanvasRenderingContext2D) {
-    ctx.fillStyle = C.textDim;
-    ctx.font = "9px ui-monospace, 'Courier New', monospace";
+    ctx.fillStyle = "#999";
+    ctx.font = "8px ui-monospace, 'Courier New', monospace";
     ctx.textAlign = "center";
-    ctx.fillText("R E T R O   ·   C A S S E T T E   ·   D E C K", W / 2, 280);
+    ctx.fillText(
+      "R E T R O   ·   C A S S E T T E   ·   D E C K",
+      W / 2,
+      261
+    );
     ctx.textAlign = "left";
   }
 
-  // ===== 拖拽手势 =====
+  // ===== 拖拽 =====
   private toLogical(clientX: number, clientY: number) {
     const rect = this.canvasEl!.getBoundingClientRect();
     return {

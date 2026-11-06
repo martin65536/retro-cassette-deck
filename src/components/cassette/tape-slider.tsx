@@ -147,9 +147,9 @@ export class TapeSlider extends React.Component<
             this.setFromClientX(e.clientX);
           }}
           className={[
-            "relative w-full rounded-full",
-            isProgress ? "h-2" : "h-1.5",
-            "bg-stone-950/60 shadow-inner border border-stone-700/40",
+            "relative w-full",
+            isProgress ? "h-1" : "h-0.5",
+            "bg-gray-200 border border-black",
           ].join(" ")}
           style={{ touchAction: "none" }}
         >
@@ -158,10 +158,8 @@ export class TapeSlider extends React.Component<
               this.fillEl = el;
             }}
             className={[
-              "absolute inset-y-0 left-0 rounded-full",
-              isProgress
-                ? "bg-gradient-to-r from-amber-600 to-orange-500"
-                : "bg-gradient-to-r from-amber-700 to-orange-600",
+              "absolute inset-y-0 left-0",
+              "bg-black",
             ].join(" ")}
             style={{ width: `${pct}%` }}
           />
@@ -171,14 +169,12 @@ export class TapeSlider extends React.Component<
             }}
             className={[
               "absolute top-1/2 -translate-y-1/2 -translate-x-1/2",
-              "rounded-full border-2 border-amber-900/60",
-              "shadow-md",
+              "border border-black",
               isProgress
-                ? "w-4 h-4 bg-gradient-to-b from-amber-100 to-amber-300"
-                : "w-3.5 h-3.5 bg-gradient-to-b from-amber-100 to-amber-400",
+                ? "w-3.5 h-3.5 bg-white"
+                : "w-3 h-3 bg-white",
               "transition-transform duration-75",
-              dragging ? "scale-110" : "group-hover:scale-105",
-              "group-focus-within:ring-2 group-focus-within:ring-orange-400/50",
+              dragging ? "scale-110 bg-black" : "group-hover:bg-gray-200",
             ].join(" ")}
             style={{ left: `${pct}%` }}
           />

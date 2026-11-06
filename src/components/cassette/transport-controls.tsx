@@ -68,35 +68,30 @@ class MechButton extends React.Component<MechButtonProps> {
         className={[
           "relative flex flex-col items-center justify-center gap-1",
           "w-16 h-16 sm:w-[72px] sm:h-[72px]",
-          "rounded-lg select-none touch-none",
+          "select-none touch-none",
           "transition-all duration-100",
-          "border-b-[4px] active:border-b-0 active:translate-y-[4px]",
+          "border border-black",
           active
-            ? "border-b-0 translate-y-[4px] bg-gradient-to-b from-orange-500 to-orange-700 border-orange-900"
-            : "bg-gradient-to-b from-amber-800 to-stone-900 border-stone-950",
-          disabled ? "opacity-40 cursor-not-allowed" : "cursor-pointer",
-          "shadow-lg shadow-stone-950/40",
+            ? "bg-black text-white"
+            : "bg-white text-black hover:bg-gray-100",
+          disabled ? "opacity-30 cursor-not-allowed" : "cursor-pointer",
         ].join(" ")}
         style={{
-          boxShadow: active
-            ? "inset 0 2px 6px rgba(0,0,0,0.5)"
-            : "0 4px 8px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.12)",
+          boxShadow: active ? "inset 0 0 0 1px #000" : "none",
         }}
       >
         <Icon
           className={[
             "w-5 h-5 sm:w-6 sm:h-6",
-            accent ? "text-orange-200" : "text-amber-100",
-            active ? "text-amber-50" : "",
+            active ? "text-white" : "text-black",
           ].join(" ")}
-          strokeWidth={2.2}
+          strokeWidth={2}
         />
         <span
           className={[
             "text-[9px] font-bold tracking-wider",
             "font-mono",
-            accent ? "text-orange-200" : "text-amber-200/90",
-            active ? "text-amber-50" : "",
+            active ? "text-white" : "text-black",
           ].join(" ")}
         >
           {label}

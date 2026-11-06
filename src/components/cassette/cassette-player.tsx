@@ -686,7 +686,7 @@ export class CassettePlayer extends React.Component<Record<string, never>, Playe
     return (
       <div className="w-full max-w-3xl mx-auto">
         {/* 磁带本体（Canvas） */}
-        <div className="relative rounded-2xl p-3 sm:p-5 bg-gradient-to-b from-stone-800 to-stone-950 border border-stone-700/60 shadow-2xl">
+        <div className="relative p-3 sm:p-5 bg-white border border-black">
           <CassetteCanvas
             ref={this.canvasRef}
             onDragStart={this.handleDragStart}
@@ -697,14 +697,14 @@ export class CassettePlayer extends React.Component<Record<string, never>, Playe
 
         {/* 拖拽提示 + 实时速率 */}
         {hasTape ? (
-          <div className="mt-3 flex items-center justify-center gap-3 text-xs text-amber-200/70 flex-wrap">
+          <div className="mt-3 flex items-center justify-center gap-3 text-xs text-gray-600 flex-wrap">
             <span className="flex items-center gap-1.5">
               <Hand className="w-3.5 h-3.5" />
               <span>
                 在带卷上转圈滑动进退（顺时针＝快进变调，逆时针＝实时倒放）
               </span>
             </span>
-            <span className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-950/60 border border-amber-700/40 text-amber-300 font-mono">
+            <span className="flex items-center gap-1 px-2 py-0.5 border border-black bg-black text-white font-mono">
               <Waves className="w-3 h-3" />
               <span ref={(el) => { this.rateBadge = el; }}>1.00×</span>
             </span>
@@ -712,7 +712,7 @@ export class CassettePlayer extends React.Component<Record<string, never>, Playe
         ) : null}
 
         {/* 传输控制 */}
-        <div className="mt-4 p-4 rounded-2xl bg-gradient-to-b from-stone-800 to-stone-900 border border-stone-700/50">
+        <div className="mt-4 p-4 bg-white border border-black">
           <TransportControls
             playing={playing}
             winding={winding}
@@ -735,7 +735,7 @@ export class CassettePlayer extends React.Component<Record<string, never>, Playe
             <div className="flex items-center gap-3">
               <span
                 ref={(el) => { this.currentTimeLabel = el; }}
-                className="text-xs font-mono tabular-nums text-amber-200/80 w-10 text-right"
+                className="text-xs font-mono tabular-nums text-black w-10 text-right"
               >
                 0:00
               </span>
@@ -750,7 +750,7 @@ export class CassettePlayer extends React.Component<Record<string, never>, Playe
                 variant="progress"
                 ariaLabel="播放进度"
               />
-              <span className="text-xs font-mono tabular-nums text-amber-200/60 w-10">
+              <span className="text-xs font-mono tabular-nums text-gray-500 w-10">
                 {formatTime(duration)}
               </span>
             </div>
@@ -762,7 +762,7 @@ export class CassettePlayer extends React.Component<Record<string, never>, Playe
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-8 w-8 text-amber-200 flex-shrink-0"
+                className="h-8 w-8 text-black flex-shrink-0"
                 onClick={() => this.setState({ muted: !muted })}
                 aria-label={muted ? "取消静音" : "静音"}
               >
@@ -779,7 +779,7 @@ export class CassettePlayer extends React.Component<Record<string, never>, Playe
                 variant="volume"
                 ariaLabel="主音量"
               />
-              <span className="text-[10px] font-mono tabular-nums text-amber-200/70 w-8 text-right">
+              <span className="text-[10px] font-mono tabular-nums text-gray-600 w-8 text-right">
                 {Math.round((muted ? 0 : volume) * 100)}
               </span>
             </div>
@@ -809,7 +809,7 @@ export class CassettePlayer extends React.Component<Record<string, never>, Playe
                 variant="volume"
                 ariaLabel="磁带音效音量"
               />
-              <span className="text-[10px] font-mono tabular-nums text-amber-200/70 w-8 text-right">
+              <span className="text-[10px] font-mono tabular-nums text-gray-600 w-8 text-right">
                 {soundsOn ? Math.round(sfxVolume * 100) : 0}
               </span>
             </div>
@@ -817,10 +817,10 @@ export class CassettePlayer extends React.Component<Record<string, never>, Playe
         </div>
 
         {/* 音频源加载 */}
-        <div className="mt-4 p-4 rounded-2xl bg-stone-900/80 border border-stone-700/50">
+        <div className="mt-4 p-4 bg-white border border-black">
           <div className="flex items-center gap-2 mb-3">
-            <div className="h-4 w-1 bg-orange-600 rounded-full" />
-            <h3 className="text-sm font-semibold text-amber-200">
+            <div className="h-4 w-1 bg-black" />
+            <h3 className="text-sm font-semibold text-black">
               装入磁带
             </h3>
           </div>
