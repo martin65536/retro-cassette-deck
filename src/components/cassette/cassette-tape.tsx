@@ -242,7 +242,10 @@ export const CassetteTape = forwardRef<SVGSVGElement, CassetteTapeProps>(
         ref={svgRef}
         viewBox="0 0 420 280"
         className="w-full h-auto select-none"
-        style={{ filter: "drop-shadow(0 18px 32px rgba(60,30,10,0.45))" }}
+        style={{
+          filter: "drop-shadow(0 18px 32px rgba(60,30,10,0.45))",
+          touchAction: "none",
+        }}
       >
         <defs>
           <linearGradient id="shellGrad" x1="0" y1="0" x2="0" y2="1">

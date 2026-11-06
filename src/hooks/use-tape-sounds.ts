@@ -39,7 +39,7 @@ class TapeSoundEngine {
         .webkitAudioContext;
     this.ctx = new AC();
     this.masterGain = this.ctx.createGain();
-    this.masterGain.gain.value = 0.9;
+    this.masterGain.gain.value = this.sfxVolume;
     this.masterGain.connect(this.ctx.destination);
 
     this.noiseBuffer = this.createNoiseBuffer();
@@ -291,6 +291,20 @@ class TapeSoundEngine {
     this.masterGain.gain.setTargetAtTime(v, this.ctx.currentTime, 0.03);
   }
 
+  // 磁带音效总音量 (0~1)，可外部调节
+  private sfxVolume = 0.6;
+
+  /** 设置磁带机械音效总音量 (0~1) */
+  setSfxVolume(v: number) {
+    this.sfxVolume = Math.max(0, Math.min(1, v));
+    if (!this.ctx || !this.masterGain) return;
+    this.masterGain.gain.setTargetAtTime(
+      this.sfxVolume,
+      this.ctx.currentTime,
+      0.03
+    );
+  }
+
   dispose() {
     try {
       this.hissSource?.stop();
@@ -310,6 +324,7 @@ class TapeSoundEngine {
  */
 export function useTapeSounds() {
   const engineRef = useRef<TapeSoundEngine | null>(null);
+  const sfxVolumeRef = useRef(0.6);
 
   useEffect(() => {
     return () => {
@@ -323,17 +338,25 @@ export function useTapeSounds() {
       engineRef.current = new TapeSoundEngine();
     }
     engineRef.current.init();
+    engineRef.current.setSfxVolume(sfxVolumeRef.current);
     engineRef.current.resume();
     return engineRef.current;
+  }, []);
+
+  /** 设置磁带音效音量 (0~1) */
+  const setSfxVolume = useCallback((v: number) => {
+    sfxVolumeRef.current = Math.max(0, Math.min(1, v));
+    engineRef.current?.setSfxVolume(sfxVolumeRef.current);
   }, []);
 
   return useMemo(
     () => ({
       ensure: getEngine,
+      setSfxVolume,
       get engine() {
         return engineRef.current;
       },
     }),
-    [getEngine]
+    [getEngine, setSfxVolume]
   );
 }

@@ -2,7 +2,10 @@ import { CassettePlayer } from "@/components/cassette/cassette-player";
 
 export default function Home() {
   return (
-    <div className="min-h-screen flex flex-col bg-gradient-to-b from-stone-900 via-stone-900 to-amber-950 text-stone-100 relative overflow-hidden">
+    <div
+      className="min-h-screen flex flex-col bg-gradient-to-b from-stone-900 via-stone-900 to-amber-950 text-stone-100 relative overflow-hidden"
+      style={{ overscrollBehavior: "none", touchAction: "pan-y" }}
+    >
       {/* 背景暖色光晕装饰 */}
       <div
         aria-hidden
