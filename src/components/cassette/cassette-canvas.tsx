@@ -177,11 +177,11 @@ export class CassetteCanvas extends React.Component<CassetteCanvasProps> {
     // 底部阴影线（1px 黑色）
     ctx.fillStyle = "#000";
     ctx.fillRect(4, H - 5, W - 8, 1);
-    // 顶部细线（标签上分隔，内陷效果）
+    // 顶部细线（标签下分隔，内陷效果）
     ctx.fillStyle = "#000";
-    ctx.fillRect(4, 100, W - 8, 1);
+    ctx.fillRect(4, 94, W - 8, 1);
     ctx.fillStyle = "#3e3e44";
-    ctx.fillRect(4, 101, W - 8, 1);
+    ctx.fillRect(4, 95, W - 8, 1);
     // 底部细线（磁头窗口上分隔）
     ctx.fillStyle = "#000";
     ctx.fillRect(4, 244, W - 8, 1);
@@ -192,10 +192,10 @@ export class CassetteCanvas extends React.Component<CassetteCanvasProps> {
   // ===== 四角十字螺丝（金属质感）=====
   private drawScrews(ctx: CanvasRenderingContext2D) {
     const pos = [
-      [18, 18],
-      [W - 18, 18],
-      [18, H - 18],
-      [W - 18, H - 18],
+      [12, 12],
+      [W - 12, 12],
+      [12, H - 12],
+      [W - 12, H - 12],
     ];
     for (const [x, y] of pos) {
       // 螺丝外圈（深色凹陷）
@@ -225,34 +225,34 @@ export class CassetteCanvas extends React.Component<CassetteCanvasProps> {
     }
   }
 
-  // ===== 标签区（凹陷纸标签，纯色叠层）=====
+  // ===== 标签区（顶部，凹陷纸标签）=====
   private drawLabel(
     ctx: CanvasRenderingContext2D,
     state: CassetteDrawState
   ) {
     // 标签纸内陷凹槽（深色边框 + 浅色纸面）
     ctx.fillStyle = "#000";
-    ctx.fillRect(12, 108, W - 24, 86);
+    ctx.fillRect(14, 16, W - 28, 74);
     // 纸面（暖灰色，模拟旧纸）
     ctx.fillStyle = "#3a3530";
-    ctx.fillRect(14, 110, W - 28, 82);
+    ctx.fillRect(16, 18, W - 32, 70);
     // 纸面顶部高光
     ctx.fillStyle = "#4a4540";
-    ctx.fillRect(14, 110, W - 28, 1);
+    ctx.fillRect(16, 18, W - 32, 1);
 
     // 左侧黑色色块
     ctx.fillStyle = "#0a0a0a";
-    ctx.fillRect(18, 114, 4, 74);
+    ctx.fillRect(20, 22, 4, 62);
 
     // 歌名（大号粗体，浅色文字）
     ctx.fillStyle = "#e8dcc8";
     ctx.textBaseline = "alphabetic";
     ctx.textAlign = "left";
     const name = state.hasTape
-      ? truncText(ctx, state.name, 240, "700 16px ui-monospace, 'Courier New', monospace")
+      ? truncText(ctx, state.name, 240, "700 15px ui-monospace, 'Courier New', monospace")
       : "—— NO TAPE ——";
-    ctx.font = "700 16px ui-monospace, 'Courier New', monospace";
-    ctx.fillText(name, 30, 132);
+    ctx.font = "700 15px ui-monospace, 'Courier New', monospace";
+    ctx.fillText(name, 32, 38);
 
     // 艺术家
     ctx.fillStyle = "#9a8a6a";
@@ -260,7 +260,7 @@ export class CassetteCanvas extends React.Component<CassetteCanvasProps> {
     const artist = state.hasTape
       ? truncText(ctx, state.artist.toUpperCase(), 240, "11px ui-monospace, 'Courier New', monospace")
       : "INSERT A CASSETTE TO PLAY";
-    ctx.fillText(artist, 30, 150);
+    ctx.fillText(artist, 32, 54);
 
     // 专辑
     if (state.hasTape && state.album) {
@@ -268,26 +268,26 @@ export class CassetteCanvas extends React.Component<CassetteCanvasProps> {
       ctx.font = "9px ui-monospace, 'Courier New', monospace";
       ctx.fillText(
         truncText(ctx, state.album, 240, "9px ui-monospace, 'Courier New', monospace"),
-        30,
-        165
+        32,
+        68
       );
     }
 
     // 右侧 SIDE A 标记（黑底白字方块）
-    const sx = W - 82;
-    const sy = 118;
+    const sx = W - 86;
+    const sy = 24;
     ctx.fillStyle = "#000";
-    ctx.fillRect(sx, sy, 54, 16);
+    ctx.fillRect(sx, sy, 54, 14);
     ctx.fillStyle = "#e8dcc8";
     ctx.font = "700 9px ui-monospace, 'Courier New', monospace";
     ctx.textAlign = "center";
-    ctx.fillText("SIDE A", sx + 27, sy + 11);
+    ctx.fillText("SIDE A", sx + 27, sy + 10);
     ctx.textAlign = "left";
 
     // 下方规格标记
     ctx.fillStyle = "#7a6a4a";
     ctx.font = "8px ui-monospace, 'Courier New', monospace";
-    ctx.fillText("90 MIN · TYPE II", sx, 186);
+    ctx.fillText("90 MIN · TYPE II", sx, 78);
   }
 
   // ===== 带卷窗口（深色凹陷，内阴影叠层）=====

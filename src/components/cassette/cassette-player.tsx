@@ -27,7 +27,9 @@ const WIND_DEG_PER_SEC = 1400;
 const FF_RATE = 15;
 const REWIND_RATE = 15;
 const NORMAL_OMEGA = (PLAY_DEG_PER_SEC * Math.PI) / 180;
-const DRAG_MAX_RATE = 8;
+// 拖拽倍速上限（Web Audio playbackRate 实际支持到 ~16-32）
+const DRAG_MAX_RATE = 16;
+const DRAG_REWIND_MAX_RATE = 12;
 
 function formatTime(s: number): string {
   if (!isFinite(s) || s < 0) s = 0;
@@ -249,8 +251,9 @@ export class CassettePlayer extends React.Component<Record<string, never>, Playe
           if (sinceRotate > 120) {
             omega = omega * Math.max(0, 1 - (sinceRotate - 120) / 400);
           }
+          // 增益 3 倍，让中等手速就能达到高倍速
           const rate = clamp(
-            Math.abs(omega) / NORMAL_OMEGA,
+            (Math.abs(omega) / NORMAL_OMEGA) * 3,
             0.0625,
             DRAG_MAX_RATE
           );
@@ -263,7 +266,7 @@ export class CassettePlayer extends React.Component<Record<string, never>, Playe
           if (sinceRotate > 120) {
             rewindSpeed *= Math.max(0, 1 - (sinceRotate - 120) / 400);
           }
-          rewindSpeed = clamp(rewindSpeed, 0.0625, 6);
+          rewindSpeed = clamp(rewindSpeed, 0.0625, DRAG_REWIND_MAX_RATE);
           eng.setRate(rewindSpeed);
           if (!eng.isPlaying) eng.play();
           this.updateUI(eng.currentTime, -rewindSpeed);
