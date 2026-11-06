@@ -226,6 +226,13 @@ export class TapeAudioEngine {
     }
   }
 
+  /** 设置有效采样率（0=自动，>0=手动 Hz） */
+  setEffectiveSampleRate(value: number) {
+    if (this.workletNode) {
+      this.workletNode.port.postMessage({ type: "setEffectiveSampleRate", value });
+    }
+  }
+
   /** 平滑 rate（由 rAF 调用） */
   tick(dt: number) {
     // worklet 内部自己平滑，这里只更新 playhead 估算

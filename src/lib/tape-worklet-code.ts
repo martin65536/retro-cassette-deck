@@ -1,16 +1,14 @@
 "use client";
 
 /**
- * AudioWorklet 采样模式处理器代码（通过 Blob URL 加载）
+ * AudioWorklet 采样模式处理器（通过 Blob URL 加载）
  *
  * 采样模式：逐样本手动读取 buffer，rate 无上限
- * - 线性插值平滑变调
+ * - 线性插值 + 二阶低通滤波（高倍速抑制刺耳混叠）
+ * - effectiveSampleRate：有效采样率，控制低通强度
+ *   - 0 = 自动（根据 rate 自动降低，模拟磁带快进高频衰减）
+ *   - >0 = 手动设定（Hz，如 8000 = 闷声）
  * - 反向播放：playhead 递减
- * - 高倍速低通滤波：rate>1 时自动降低截止频率，模拟磁带快进高频衰减
- *   （避免数字采样产生的镜像频率/混叠刺耳声）
- *
- * 真实磁带快进不刺耳的原因：模拟信号高频自然衰减 + 磁头接触不紧密
- * 数字采样需要主动加低通模拟这个效果
  */
 const WORKLET_CODE = `
 class TapeProcessor extends AudioWorkletProcessor {
@@ -25,11 +23,12 @@ class TapeProcessor extends AudioWorkletProcessor {
     this.smoothedRate = 1;
     this.reverse = false;
     this.volume = 0.85;
+    // 有效采样率：0=自动，>0=手动（Hz）
+    this.effectiveSampleRate = 0;
 
-    // 一阶低通滤波器状态（每声道）
-    this.filterState = [0, 0];
-    // 上一个样本（用于更高阶插值）
-    this.prevSample = [0, 0];
+    // 二阶低通滤波器状态（每声道 2 个状态）
+    this.filterState1 = [0, 0];
+    this.filterState2 = [0, 0];
 
     this.port.onmessage = (e) => {
       const msg = e.data;
@@ -38,8 +37,9 @@ class TapeProcessor extends AudioWorkletProcessor {
         this.length = msg.length;
         this.sampleRate = msg.sampleRate;
         this.playhead = 0;
-        this.filterState = new Array(this.channelData.length).fill(0);
-        this.prevSample = new Array(this.channelData.length).fill(0);
+        const n = this.channelData.length;
+        this.filterState1 = new Array(n).fill(0);
+        this.filterState2 = new Array(n).fill(0);
       } else if (msg.type === 'play') {
         this.playing = true;
         if (msg.offset != null) this.playhead = msg.offset;
@@ -56,8 +56,22 @@ class TapeProcessor extends AudioWorkletProcessor {
         this.reverse = msg.reverse;
       } else if (msg.type === 'setVolume') {
         this.volume = Math.max(0, Math.min(1, msg.volume));
+      } else if (msg.type === 'setEffectiveSampleRate') {
+        this.effectiveSampleRate = Math.max(0, msg.value);
       }
     };
+  }
+
+  // 二阶低通滤波器（级联两个一阶，衰减斜率更陡）
+  // 返回滤波后样本
+  processSample(sample, ch, a) {
+    // 第一级
+    const s1 = this.filterState1[ch] + a * (sample - this.filterState1[ch]);
+    this.filterState1[ch] = s1;
+    // 第二级
+    const s2 = this.filterState2[ch] + a * (s1 - this.filterState2[ch]);
+    this.filterState2[ch] = s2;
+    return s2;
   }
 
   process(inputs, outputs) {
@@ -81,25 +95,28 @@ class TapeProcessor extends AudioWorkletProcessor {
     const vol = this.volume;
     const sr = this.sampleRate || 44100;
 
-    // 低通滤波器系数：rate 越高，截止频率越低（模拟磁带快进高频衰减）
-    // 正常播放(rate=1)时几乎不滤波；rate=10 时截止约 4kHz；rate=20 时约 2kHz
-    // 使用一阶低通：y[n] = y[n-1] + a*(x[n] - y[n-1])
-    // 截止频率 fc，a = 2*PI*fc/sr（简化）
+    // 计算低通滤波器系数
+    // effectiveSampleRate=0 时自动：根据 rate 降低截止频率
+    // effectiveSampleRate>0 时手动：截止频率 = effectiveSampleRate/2
     let cutoffFreq;
-    if (rate <= 1.5) {
-      // 低倍速：不滤波（保持原音质）
+    if (this.effectiveSampleRate > 0) {
+      // 手动模式：截止频率 = 有效采样率的一半
+      cutoffFreq = this.effectiveSampleRate * 0.45;
+    } else if (rate <= 1.5) {
+      // 正常播放：不滤波
       cutoffFreq = sr * 0.45;
     } else {
-      // 高倍速：截止频率随 rate 反比下降
-      // 真实磁带快进时，高频约保留到 (sr/2) / rate
-      cutoffFreq = Math.max(800, (sr * 0.45) / Math.sqrt(rate));
+      // 自动模式：截止频率随 rate 降低（二阶衰减更狠）
+      // 真实磁带快进：高频保留约 (sr/2)/rate
+      // 这里用更激进的衰减让高倍速更闷
+      cutoffFreq = Math.max(500, (sr * 0.4) / rate);
     }
-    const a = Math.min(1, (2 * Math.PI * cutoffFreq) / sr);
+    // 一阶低通系数：a = 1 - exp(-2*PI*fc/sr)
+    const a = 1 - Math.exp(-(2 * Math.PI * cutoffFreq) / sr);
 
     for (let i = 0; i < blockSize; i++) {
-      // 边界检查
       if (this.playhead < 0 || this.playhead >= this.length - 2) {
-        this.playhead = this.reverse ? 0 : 0;
+        this.playhead = 0;
         this.playing = false;
         this.port.postMessage({ type: 'ended' });
         for (let c = 0; c < numCh; c++) output[c].fill(0, i);
@@ -111,23 +128,21 @@ class TapeProcessor extends AudioWorkletProcessor {
 
       for (let c = 0; c < dataCh; c++) {
         const data = this.channelData[c];
-        // 线性插值读取
         const s1 = data[idx] || 0;
         const s2 = data[idx + 1] || 0;
         let sample = s1 + (s2 - s1) * frac;
 
-        // 一阶低通滤波（高倍速时抑制刺耳高频）
-        const prev = this.filterState[c];
-        const filtered = prev + a * (sample - prev);
-        this.filterState[c] = filtered;
+        // 二阶低通滤波
+        if (rate > 1.5 || this.effectiveSampleRate > 0) {
+          sample = this.processSample(sample, c, a);
+        }
 
-        output[c][i] = filtered * vol;
+        output[c][i] = sample * vol;
       }
       for (let c = dataCh; c < numCh; c++) {
         output[c][i] = 0;
       }
 
-      // 推进播放指针
       if (this.reverse) {
         this.playhead -= rate;
       } else {

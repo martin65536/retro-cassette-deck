@@ -54,6 +54,7 @@ interface PlayerState {
   progress: number;
   maxRate: number;      // 可调最高倍速，默认 20
   inertiaTime: number;  // 惯性时长(秒)，默认 0.8
+  effectiveSampleRate: number;  // 有效采样率 0=自动, >0=手动Hz
 }
 
 const INITIAL_STATE: PlayerState = {
@@ -70,6 +71,7 @@ const INITIAL_STATE: PlayerState = {
   progress: 0,
   maxRate: 20,
   inertiaTime: 0.8,
+  effectiveSampleRate: 0,
 };
 
 /**
@@ -161,6 +163,9 @@ export class CassettePlayer extends React.Component<Record<string, never>, Playe
     }
     if (prevState.sfxVolume !== this.state.sfxVolume) {
       this.tapeSounds.setSfxVolume(this.state.sfxVolume);
+    }
+    if (prevState.effectiveSampleRate !== this.state.effectiveSampleRate) {
+      this.audio.setEffectiveSampleRate(this.state.effectiveSampleRate);
     }
 
     if (this.state.playing || this.state.winding !== null) {
@@ -918,6 +923,21 @@ export class CassettePlayer extends React.Component<Record<string, never>, Playe
               />
               <span className="text-[10px] font-mono tabular-nums text-stone-300 w-10 text-right">
                 {this.state.inertiaTime.toFixed(1)}s
+              </span>
+            </div>
+            <div className="flex items-center gap-2.5">
+              <span className="text-[10px] font-mono text-stone-400 w-12 flex-shrink-0">采样率</span>
+              <TapeSlider
+                value={this.state.effectiveSampleRate}
+                min={0}
+                max={44100}
+                step={100}
+                onChange={(v) => this.setState({ effectiveSampleRate: v })}
+                variant="volume"
+                ariaLabel="有效采样率"
+              />
+              <span className="text-[10px] font-mono tabular-nums text-stone-300 w-10 text-right">
+                {this.state.effectiveSampleRate === 0 ? "自动" : `${Math.round(this.state.effectiveSampleRate / 1000)}k`}
               </span>
             </div>
           </div>
