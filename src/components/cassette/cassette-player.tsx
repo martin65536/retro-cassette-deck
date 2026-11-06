@@ -18,6 +18,7 @@ import { TransportControls } from "./transport-controls";
 import { SourceLoader, type Track } from "./source-loader";
 import { TapeSlider } from "./tape-slider";
 import { useTapeSounds } from "@/hooks/use-tape-sounds";
+import { useAudioEngine } from "@/hooks/use-audio-engine";
 import { useCircularDrag } from "@/hooks/use-circular-drag";
 import { Button } from "@/components/ui/button";
 import {
@@ -27,22 +28,19 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 
-// ===== 常量 =====
 // 带卷视觉旋转速度（度/秒）
 const PLAY_DEG_PER_SEC = 80;
 const WIND_DEG_PER_SEC = 760;
-// 快进/快退 seek 倍速
-const WIND_SEEK_SPEED = 8;
-// 拖拽时每弧度对应的 seek 秒数（用于逆时针倒退；顺时针让 audio 自然推进）
-const SEEK_PER_RAD_REVERSE = 1.6;
-// 正常播放对应的带卷角速度（rad/s），用于把拖拽角速度换算为 playbackRate
-// PLAY_DEG_PER_SEC=80°/s ≈ 1.396 rad/s
+// 快退 seek 速度（倍速）
+const WIND_REWIND_SPEED = 8;
+// 快进按钮播放倍率（实时变调高音）
+const FF_RATE = 4;
+// 拖拽：每弧度对应的倒带秒数（逆时针用）
+const SEEK_PER_RAD_REVERSE = 1.8;
+// 正常播放对应的带卷角速度（rad/s），用于把拖拽角速度换算为 rate
 const NORMAL_OMEGA = (PLAY_DEG_PER_SEC * Math.PI) / 180;
-// 拖拽时 playbackRate 范围（Chrome 支持范围约 0.0625~16）
-const MIN_RATE = 0.0625;
-const MAX_RATE = 4.5;
-// 快进按钮的播放倍率（会产生高音变调）
-const FF_RATE = 6;
+// 拖拽顺时针 rate 范围
+const DRAG_MAX_RATE = 5;
 
 function formatTime(s: number): string {
   if (!isFinite(s) || s < 0) s = 0;
@@ -54,25 +52,8 @@ function formatTime(s: number): string {
 const clamp = (v: number, lo: number, hi: number) =>
   Math.max(lo, Math.min(hi, v));
 
-/**
- * 设置 audio 元素为"磁带模式"：改变 playbackRate 时音高随之变化（不保持音高）
- * 这是实现实时变调的关键 —— 不需要 Web Audio API 的 MediaElementSource，
- * 直接用 HTMLMediaElement 原生属性，避免跨域 CORS 问题。
- */
-function applyTapePitch(audio: HTMLAudioElement) {
-  // 标准属性 + 浏览器前缀
-  (audio as HTMLAudioElement & { preservesPitch?: boolean }).preservesPitch =
-    false;
-  (
-    audio as HTMLAudioElement & { mozPreservesPitch?: boolean }
-  ).mozPreservesPitch = false;
-  (
-    audio as HTMLAudioElement & { webkitPreservesPitch?: boolean }
-  ).webkitPreservesPitch = false;
-}
-
 export function CassettePlayer() {
-  // ===== 播放状态 =====
+  // ===== 状态 =====
   const [track, setTrack] = useState<Track | null>(null);
   const [playing, setPlaying] = useState(false);
   const [winding, setWinding] = useState<Winding>(null);
@@ -80,17 +61,17 @@ export function CassettePlayer() {
   const [duration, setDuration] = useState(0);
   const [volume, setVolume] = useState(0.85);
   const [muted, setMuted] = useState(false);
-  const [sfxVolume, setSfxVolume] = useState(0.6); // 磁带音效音量 0~1
+  const [sfxVolume, setSfxVolume] = useState(0.6);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [soundsOn, setSoundsOn] = useState(true);
-  const [liveRate, setLiveRate] = useState(1); // 当前实际 playbackRate（用于 UI 显示）
+  const [liveRate, setLiveRate] = useState(1);
+  const [isFallback, setIsFallback] = useState(false);
 
   const hasTape = track !== null;
   const progress = duration > 0 ? currentTime / duration : 0;
 
   // ===== refs =====
-  const audioRef = useRef<HTMLAudioElement | null>(null);
   const leftReelElRef = useRef<SVGGElement | null>(null);
   const rightReelElRef = useRef<SVGGElement | null>(null);
   const leftAngleRef = useRef(0);
@@ -108,14 +89,49 @@ export function CassettePlayer() {
     active: false,
     side: "right" as "left" | "right",
     wasPlaying: false,
-    seekTarget: 0,
-    /** 最近一次旋转的方向与瞬时角速度（rad/s）+ 时间戳 */
     direction: "none" as "forward" | "backward" | "none",
     omega: 0,
     lastRotateTime: 0,
+    rewindSpeed: 0, // 逆时针倒带速度（秒/秒）
   });
 
   const tapeSounds = useTapeSounds();
+  const audio = useAudioEngine();
+
+  // 回调绑定
+  audio.onEndedRef.current = () => {
+    setPlaying(false);
+    windingRef.current = null;
+    setWinding(null);
+    setCurrentTime(0);
+    setLiveRate(1);
+    if (soundsOnRef.current) {
+      const eng = tapeSounds.ensure();
+      eng.setHiss(false);
+      eng.brake();
+    }
+  };
+  audio.onLoadedRef.current = (dur) => {
+    setDuration(dur);
+    durationRef.current = dur;
+    const eng = audio.getEngine();
+    setIsFallback(eng?.isFallback ?? false);
+    if (soundsOnRef.current) {
+      tapeSounds.ensure().load();
+    }
+    // 延迟自动播放
+    setTimeout(() => {
+      if (hasTapeRef.current) {
+        audio.play(0);
+        setPlaying(true);
+        if (soundsOnRef.current) tapeSounds.ensure().setHiss(true);
+      }
+    }, 700);
+  };
+  audio.onErrorRef.current = (msg) => {
+    setError(msg);
+    setPlaying(false);
+  };
 
   // 同步 ref
   useEffect(() => {
@@ -137,13 +153,14 @@ export function CassettePlayer() {
       tapeSounds.engine?.setWind(0, true);
     }
   }, [soundsOn, tapeSounds]);
-
-  // 同步音效音量
   useEffect(() => {
     tapeSounds.setSfxVolume(sfxVolume);
   }, [sfxVolume, tapeSounds]);
+  useEffect(() => {
+    audio.setVolume(muted ? 0 : volume);
+  }, [volume, muted, audio]);
 
-  // 设置带卷 transform
+  // 带卷 transform
   const applyReelTransform = useCallback(() => {
     if (leftReelElRef.current) {
       leftReelElRef.current.setAttribute(
@@ -159,139 +176,125 @@ export function CassettePlayer() {
     }
   }, []);
 
-  // ===== rAF 循环：带卷旋转 + 拖拽/快进推进 =====
+  // ===== rAF 主循环 =====
   const stopWindingRef = useRef<() => void>(() => {});
 
   useEffect(() => {
     let last = performance.now();
     const loop = (now: number) => {
-      let next = true;
-      try {
-        const dt = Math.min(0.1, (now - last) / 1000);
-        last = now;
-        const audio = audioRef.current;
+      const dt = Math.min(0.1, (now - last) / 1000);
+      last = now;
+      const eng = audio.getEngine();
 
-        if (dragStateRef.current.active && audio && hasTapeRef.current) {
-          const ds = dragStateRef.current;
-          const sinceRotate = now - ds.lastRotateTime;
-          const dur = durationRef.current;
+      // 引擎 tick（平滑 rate + 推进 playhead）
+      if (eng) eng.tick(dt);
 
-          if (ds.direction === "forward") {
-            // 顺时针：保持播放，playbackRate 由角速度决定（实时变调）
-            let rate: number;
-            if (sinceRotate < 200) {
-              rate = clamp(
-                Math.abs(ds.omega) / NORMAL_OMEGA,
-                MIN_RATE,
-                MAX_RATE
-              );
-            } else {
-              rate = MIN_RATE;
-            }
-            audio.playbackRate = rate;
-            setLiveRate(rate);
-            setCurrentTime(audio.currentTime);
-          } else if (ds.direction === "backward") {
-            // 逆时针：暂停 + 手动倒退 + 卷带音效
-            if (!audio.paused) audio.pause();
-            if (sinceRotate < 200) {
-              const speed = Math.abs(ds.omega);
-              const rewindPerSec =
-                (speed / NORMAL_OMEGA) * WIND_SEEK_SPEED;
-              ds.seekTarget = clamp(
-                ds.seekTarget - rewindPerSec * dt,
-                0,
-                dur > 0 ? dur : 0
-              );
-            }
-            if (Math.abs(audio.currentTime - ds.seekTarget) > 0.05) {
-              try {
-                audio.currentTime = ds.seekTarget;
-              } catch {
-                /* ignore */
-              }
-            }
-            setCurrentTime(ds.seekTarget);
-            setLiveRate(0);
-          } else {
-            // direction=none，刚按下还没动
-            audio.playbackRate = MIN_RATE;
-            setLiveRate(MIN_RATE);
+      const ds = dragStateRef.current;
+
+      if (ds.active && eng && hasTapeRef.current) {
+        // ===== 拖拽模式 =====
+        const sinceRotate = now - ds.lastRotateTime;
+
+        if (ds.direction === "forward") {
+          // 顺时针：source 保持播放，rate 跟随角速度（连续变调）
+          let omega = ds.omega;
+          // 停顿时 omega 衰减
+          if (sinceRotate > 120) {
+            omega = omega * Math.max(0, 1 - (sinceRotate - 120) / 400);
           }
+          const rate = clamp(
+            Math.abs(omega) / NORMAL_OMEGA,
+            0.0625,
+            DRAG_MAX_RATE
+          );
+          eng.setRate(rate);
+          setLiveRate(rate);
+          if (!eng.isPlaying) eng.play();
+          // 同步 UI 时间
+          setCurrentTime(eng.currentTime);
+        } else if (ds.direction === "backward") {
+          // 逆时针：暂停 source + 手动倒退 playhead（精确）
+          if (eng.isPlaying) eng.pause();
+          let rewindSpeed = Math.abs(ds.omega) * 1.2; // rad/s → 倍速
+          if (sinceRotate > 120) {
+            rewindSpeed *= Math.max(0, 1 - (sinceRotate - 120) / 400);
+          }
+          rewindSpeed = clamp(rewindSpeed, 0, 12);
+          const newTime = eng.currentTime - rewindSpeed * dt;
+          eng.setPlayhead(newTime);
+          setCurrentTime(eng.currentTime);
+          setLiveRate(0);
+        } else {
+          // direction=none：刚按下
+          eng.setRate(0.0625);
+          setLiveRate(0.0625);
+        }
 
-          // 带卷视觉旋转跟随拖拽方向
-          if (ds.direction !== "none") {
-            const visSpeed = Math.abs(ds.omega) * (180 / Math.PI);
-            const sign = ds.direction === "forward" ? 1 : -1;
-            if (ds.side === "right") {
-              rightAngleRef.current += sign * visSpeed * dt;
-              leftAngleRef.current -= sign * visSpeed * dt;
-            } else {
-              leftAngleRef.current -= sign * visSpeed * dt;
-              rightAngleRef.current += sign * visSpeed * dt;
-            }
+        // 带卷视觉跟随角速度
+        if (ds.direction !== "none") {
+          const visOmega = Math.abs(ds.omega);
+          const visDeg = visOmega * (180 / Math.PI) * dt;
+          const sign = ds.direction === "forward" ? 1 : -1;
+          if (ds.side === "right") {
+            rightAngleRef.current += sign * visDeg;
+            leftAngleRef.current -= sign * visDeg;
+          } else {
+            leftAngleRef.current -= sign * visDeg;
+            rightAngleRef.current += sign * visDeg;
+          }
+          applyReelTransform();
+        }
+      } else {
+        // ===== 非拖拽：正常播放 / 快进快退 =====
+        if (windingRef.current && eng && hasTapeRef.current) {
+          if (windingRef.current === "forward") {
+            // 快进：保持播放，rate=FF_RATE（连续变调）
+            eng.setRate(FF_RATE);
+            if (!eng.isPlaying) eng.play();
+            setLiveRate(FF_RATE);
+            setCurrentTime(eng.currentTime);
+          } else {
+            // 快退：暂停 + 倒退 playhead
+            if (eng.isPlaying) eng.pause();
+            const newTime = eng.currentTime - WIND_REWIND_SPEED * dt;
+            eng.setPlayhead(newTime);
+            setCurrentTime(eng.currentTime);
+            setLiveRate(0);
+            if (eng.currentTime <= 0.05) stopWindingRef.current();
+          }
+        } else if (playingRef.current && eng) {
+          eng.setRate(1);
+          setLiveRate(1);
+          setCurrentTime(eng.currentTime);
+        } else {
+          setLiveRate(eng?.isPlaying ? eng.currentRate : 0);
+        }
+
+        // 带卷旋转
+        if (hasTapeRef.current) {
+          if (windingRef.current === "forward") {
+            leftAngleRef.current -= WIND_DEG_PER_SEC * dt;
+            rightAngleRef.current += WIND_DEG_PER_SEC * dt;
+            applyReelTransform();
+          } else if (windingRef.current === "rewind") {
+            leftAngleRef.current += WIND_DEG_PER_SEC * dt;
+            rightAngleRef.current -= WIND_DEG_PER_SEC * dt;
+            applyReelTransform();
+          } else if (playingRef.current) {
+            leftAngleRef.current -= PLAY_DEG_PER_SEC * dt;
+            rightAngleRef.current += PLAY_DEG_PER_SEC * dt;
             applyReelTransform();
           }
-        } else {
-          // ===== 非拖拽：快进/快退 / 播放 =====
-          if (windingRef.current && audio && hasTapeRef.current) {
-            if (windingRef.current === "forward") {
-              if (audio.paused) {
-                audio.play().catch(() => {});
-              }
-              audio.playbackRate = FF_RATE;
-              setLiveRate(FF_RATE);
-            } else {
-              if (!audio.paused) audio.pause();
-              const newTime =
-                audio.currentTime - WIND_SEEK_SPEED * dt;
-              const dur = durationRef.current;
-              const clamped = clamp(newTime, 0, dur > 0 ? dur - 0.05 : 0);
-              try {
-                audio.currentTime = clamped;
-              } catch {
-                /* ignore */
-              }
-              setCurrentTime(clamped);
-              setLiveRate(0);
-              if (clamped <= 0.05) stopWindingRef.current();
-            }
-          } else if (playingRef.current && audio) {
-            audio.playbackRate = 1;
-            setLiveRate(1);
-          } else {
-            setLiveRate(audio?.paused ? 0 : 1);
-          }
-
-          // 带卷旋转
-          if (hasTapeRef.current) {
-            if (windingRef.current === "forward") {
-              leftAngleRef.current -= WIND_DEG_PER_SEC * dt;
-              rightAngleRef.current += WIND_DEG_PER_SEC * dt;
-              applyReelTransform();
-            } else if (windingRef.current === "rewind") {
-              leftAngleRef.current += WIND_DEG_PER_SEC * dt;
-              rightAngleRef.current -= WIND_DEG_PER_SEC * dt;
-              applyReelTransform();
-            } else if (playingRef.current) {
-              leftAngleRef.current -= PLAY_DEG_PER_SEC * dt;
-              rightAngleRef.current += PLAY_DEG_PER_SEC * dt;
-              applyReelTransform();
-            }
-          }
         }
-      } catch (err) {
-        console.error("[rAF] loop error:", err);
       }
-      if (next) {
-        rafRef.current = requestAnimationFrame(loop);
-      }
+
+      rafRef.current = requestAnimationFrame(loop);
     };
     rafRef.current = requestAnimationFrame(loop);
     return () => {
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
     };
-  }, [applyReelTransform]);
+  }, [applyReelTransform, audio]);
 
   // ===== 控制函数 =====
 
@@ -301,86 +304,73 @@ export function CassettePlayer() {
   }, [tapeSounds]);
 
   const play = useCallback(() => {
-    const audio = audioRef.current;
-    if (!audio || !hasTapeRef.current) return;
-    applyTapePitch(audio);
-    audio.playbackRate = 1;
-    audio.volume = muted ? 0 : volume;
-    audio
-      .play()
-      .then(() => {
-        setPlaying(true);
-        if (soundsOnRef.current) {
-          const eng = tapeSounds.ensure();
-          eng.click(0.8);
-          eng.setHiss(true);
-        }
-      })
-      .catch(() => {
-        setError("播放失败，可能是音频源不可用或被浏览器阻止。");
-      });
-  }, [volume, muted, tapeSounds]);
+    const eng = audio.getEngine();
+    if (!eng || !hasTapeRef.current) return;
+    audio.resume();
+    eng.setRate(1);
+    if (!eng.isPlaying) eng.play();
+    setPlaying(true);
+    if (soundsOnRef.current) {
+      const sEng = tapeSounds.ensure();
+      sEng.click(0.8);
+      sEng.setHiss(true);
+    }
+  }, [audio, tapeSounds]);
 
   const pause = useCallback(() => {
-    const audio = audioRef.current;
-    if (!audio) return;
-    audio.pause();
-    audio.playbackRate = 1;
+    const eng = audio.getEngine();
+    if (!eng) return;
+    eng.pause();
+    eng.setRate(1);
     setPlaying(false);
     if (soundsOnRef.current) {
-      const eng = tapeSounds.ensure();
-      eng.click(0.7);
-      eng.setHiss(false);
+      const sEng = tapeSounds.ensure();
+      sEng.click(0.7);
+      sEng.setHiss(false);
     }
-  }, [tapeSounds]);
+  }, [audio, tapeSounds]);
 
   const stop = useCallback(() => {
-    const audio = audioRef.current;
-    if (!audio) return;
-    audio.pause();
-    audio.playbackRate = 1;
-    audio.currentTime = 0;
+    const eng = audio.getEngine();
+    if (!eng) return;
+    eng.stop();
+    eng.setRate(1);
     setPlaying(false);
     setWinding(null);
     windingRef.current = null;
     setCurrentTime(0);
+    setLiveRate(0);
     if (soundsOnRef.current) {
-      const eng = tapeSounds.ensure();
-      eng.brake();
-      eng.setHiss(false);
-      eng.setWind(0, true);
+      const sEng = tapeSounds.ensure();
+      sEng.brake();
+      sEng.setHiss(false);
+      sEng.setWind(0, true);
     }
-  }, [tapeSounds]);
+  }, [audio, tapeSounds]);
 
   const startWinding = useCallback(
     (dir: "forward" | "rewind") => {
-      const audio = audioRef.current;
-      if (!audio || !hasTapeRef.current) return;
-      applyTapePitch(audio);
+      const eng = audio.getEngine();
+      if (!eng || !hasTapeRef.current) return;
+      audio.resume();
       if (dir === "forward") {
-        // 快进：保持播放，playbackRate=6 产生高音变调
-        if (audio.paused) {
-          audio.volume = muted ? 0 : volume;
-          audio.play().catch(() => {});
-        }
-        audio.playbackRate = FF_RATE;
+        eng.setRate(FF_RATE);
+        if (!eng.isPlaying) eng.play();
         setPlaying(true);
       } else {
-        // 快退：暂停 + 手动倒退
-        audio.pause();
-        audio.playbackRate = 1;
+        eng.pause();
         setPlaying(false);
       }
       setWinding(dir);
       windingRef.current = dir;
       if (soundsOnRef.current) {
-        const eng = tapeSounds.ensure();
-        eng.click(0.9);
-        eng.setHiss(false);
-        eng.setWind(0.85, dir === "forward");
+        const sEng = tapeSounds.ensure();
+        sEng.click(0.9);
+        sEng.setHiss(false);
+        sEng.setWind(0.85, dir === "forward");
       }
     },
-    [volume, muted, tapeSounds]
+    [audio, tapeSounds]
   );
 
   const stopWinding = useCallback(() => {
@@ -388,30 +378,30 @@ export function CassettePlayer() {
     const wasForward = windingRef.current === "forward";
     setWinding(null);
     windingRef.current = null;
-    const audio = audioRef.current;
-    if (audio) {
-      if (wasForward) {
-        // 快进回到正常播放
-        audio.playbackRate = 1;
-      }
+    const eng = audio.getEngine();
+    if (eng) {
+      eng.setRate(1);
     }
     if (soundsOnRef.current) {
-      const eng = tapeSounds.ensure();
-      eng.setWind(0, true);
-      eng.brake();
+      const sEng = tapeSounds.ensure();
+      sEng.setWind(0, true);
+      sEng.brake();
     }
-  }, [tapeSounds]);
+    // 快进松手后保持播放（已经是 playing 状态）
+    if (!wasForward) {
+      setPlaying(false);
+    }
+  }, [audio, tapeSounds]);
 
   useEffect(() => {
     stopWindingRef.current = stopWinding;
   }, [stopWinding]);
 
   const eject = useCallback(() => {
-    const audio = audioRef.current;
-    if (audio) {
-      audio.pause();
-      audio.removeAttribute("src");
-      audio.load();
+    const eng = audio.getEngine();
+    if (eng) {
+      eng.pause();
+      eng.setRate(1);
     }
     setPlaying(false);
     setWinding(null);
@@ -421,68 +411,64 @@ export function CassettePlayer() {
     durationRef.current = 0;
     setTrack(null);
     hasTapeRef.current = false;
+    setIsFallback(false);
     leftAngleRef.current = 0;
     rightAngleRef.current = 0;
     applyReelTransform();
     if (soundsOnRef.current) {
-      const eng = tapeSounds.ensure();
-      eng.eject();
-      eng.setHiss(false);
-      eng.setWind(0, true);
+      const sEng = tapeSounds.ensure();
+      sEng.eject();
+      sEng.setHiss(false);
+      sEng.setWind(0, true);
     }
-  }, [tapeSounds, applyReelTransform]);
+  }, [audio, tapeSounds, applyReelTransform]);
 
-  // ===== 拖拽（在带卷上转圈滑动） =====
+  // ===== 拖拽 =====
 
   const handleDragStart = useCallback(
     (side: "left" | "right") => {
-      const audio = audioRef.current;
-      if (!audio || !hasTapeRef.current) return;
-      applyTapePitch(audio);
+      const eng = audio.getEngine();
+      if (!eng || !hasTapeRef.current) return;
+      audio.resume();
       dragStateRef.current.active = true;
       dragStateRef.current.side = side;
       dragStateRef.current.wasPlaying = playingRef.current;
-      dragStateRef.current.seekTarget = audio.currentTime;
       dragStateRef.current.direction = "none";
       dragStateRef.current.omega = 0;
       dragStateRef.current.lastRotateTime = performance.now();
       if (soundsOnRef.current) {
-        const eng = tapeSounds.ensure();
-        eng.setHiss(false);
-        eng.setWind(0.45, side === "right");
+        const sEng = tapeSounds.ensure();
+        sEng.setHiss(false);
+        sEng.setWind(0.45, side === "right");
       }
     },
-    [tapeSounds]
+    [audio, tapeSounds]
   );
 
   const handleDragEnd = useCallback(() => {
     if (!dragStateRef.current.active) return;
     const wasPlaying = dragStateRef.current.wasPlaying;
-    dragStateRef.current.active = false;
-    dragStateRef.current.direction = "none";
-    const audio = audioRef.current;
-    if (audio) {
-      audio.playbackRate = 1;
+    const ds = dragStateRef.current;
+    ds.active = false;
+    ds.direction = "none";
+    const eng = audio.getEngine();
+    if (eng) {
+      eng.setRate(1);
     }
     if (soundsOnRef.current) {
-      const eng = tapeSounds.ensure();
-      eng.setWind(0, true);
-      eng.brake();
+      const sEng = tapeSounds.ensure();
+      sEng.setWind(0, true);
+      sEng.brake();
     }
     // 恢复播放
-    if (wasPlaying && audio) {
-      audio
-        .play()
-        .then(() => {
-          setPlaying(true);
-          if (soundsOnRef.current) tapeSounds.ensure().setHiss(true);
-        })
-        .catch(() => {});
-    } else if (audio) {
-      audio.pause();
+    if (wasPlaying && eng) {
+      eng.play();
+      setPlaying(true);
+      if (soundsOnRef.current) tapeSounds.ensure().setHiss(true);
+    } else if (eng) {
       setPlaying(false);
     }
-  }, [tapeSounds]);
+  }, [audio, tapeSounds]);
 
   const handleRotate = useCallback(
     (deltaRad: number, side: "left" | "right") => {
@@ -490,10 +476,10 @@ export function CassettePlayer() {
       const now = performance.now();
       const ds = dragStateRef.current;
 
-      // 计算瞬时角速度（rad/s），用低通滤波平滑
+      // 瞬时角速度，低通滤波平滑
       const dt = Math.max(0.001, (now - ds.lastRotateTime) / 1000);
       const instOmega = deltaRad / dt;
-      ds.omega = ds.omega * 0.5 + instOmega * 0.5;
+      ds.omega = ds.omega * 0.55 + instOmega * 0.45;
       ds.lastRotateTime = now;
 
       // 判断方向：右卷 delta>0 = 快进；左卷 delta>0 = 倒带
@@ -505,35 +491,8 @@ export function CassettePlayer() {
       }
       ds.direction = forward ? "forward" : "backward";
 
+      // 立即更新带卷视觉（跟手）
       const degDelta = deltaRad * (180 / Math.PI);
-
-      if (forward) {
-        // 顺时针：让 audio 自然推进（playbackRate 跟随角速度，实时变调）
-        const audio = audioRef.current;
-        if (audio) {
-          if (audio.paused) {
-            audio.volume = muted ? 0 : volume;
-            audio.play().catch(() => {});
-          }
-          // 立即设置 playbackRate（不等 rAF），让变调即时响应
-          const rate = clamp(
-            Math.abs(ds.omega) / NORMAL_OMEGA,
-            MIN_RATE,
-            MAX_RATE
-          );
-          audio.playbackRate = rate;
-        }
-      } else {
-        // 逆时针：seekTarget 倒退
-        const dur = durationRef.current;
-        ds.seekTarget = clamp(
-          ds.seekTarget - Math.abs(deltaRad) * SEEK_PER_RAD_REVERSE,
-          0,
-          dur > 0 ? dur : 0
-        );
-      }
-
-      // 带卷视觉立即响应（更跟手）
       if (side === "right") {
         rightAngleRef.current += degDelta;
         leftAngleRef.current -= degDelta;
@@ -543,10 +502,9 @@ export function CassettePlayer() {
       }
       applyReelTransform();
     },
-    [applyReelTransform, volume, muted]
+    [applyReelTransform]
   );
 
-  // 两个圆形拖拽实例
   const leftDrag = useCircularDrag({
     onRotate: (d) => handleRotate(d, "left"),
     onDragStart: () => handleDragStart("left"),
@@ -585,13 +543,13 @@ export function CassettePlayer() {
   // ===== 音频源加载 =====
 
   const loadTrack = useCallback(
-    (newTrack: Track) => {
+    async (newTrack: Track) => {
       if (hasTapeRef.current && soundsOnRef.current) {
         tapeSounds.ensure().eject();
       }
-      const audio = audioRef.current;
-      if (audio) {
-        audio.pause();
+      const eng = audio.getEngine();
+      if (eng) {
+        eng.pause();
       }
       setPlaying(false);
       setWinding(null);
@@ -600,12 +558,24 @@ export function CassettePlayer() {
       setDuration(0);
       durationRef.current = 0;
       setError(null);
+      setIsFallback(false);
       leftAngleRef.current = 0;
       rightAngleRef.current = 0;
       setTrack(newTrack);
       hasTapeRef.current = true;
+      // 加载音频
+      setLoading(true);
+      try {
+        await audio.load(newTrack.url);
+      } catch (e) {
+        setError(
+          `音频加载失败：${e instanceof Error ? e.message : "未知错误"}`
+        );
+      } finally {
+        setLoading(false);
+      }
     },
-    [tapeSounds]
+    [audio, tapeSounds]
   );
 
   const handleNetEase = useCallback(
@@ -628,7 +598,7 @@ export function CassettePlayer() {
           return;
         }
         const song = data.data;
-        loadTrack({
+        await loadTrack({
           url: song.url,
           name: song.name,
           artist: song.artist,
@@ -653,88 +623,12 @@ export function CassettePlayer() {
     [loadTrack]
   );
 
-  // ===== audio 元素事件 =====
-
-  const onLoadedMetadata = () => {
-    const audio = audioRef.current;
-    if (!audio) return;
-    applyTapePitch(audio);
-    const d = isFinite(audio.duration) ? audio.duration : 0;
-    setDuration(d);
-    durationRef.current = d;
-    if (soundsOnRef.current) {
-      tapeSounds.ensure().load();
-    }
-    setTimeout(() => {
-      if (audio && hasTapeRef.current) {
-        audio.volume = muted ? 0 : volume;
-        audio
-          .play()
-          .then(() => {
-            setPlaying(true);
-            if (soundsOnRef.current) tapeSounds.ensure().setHiss(true);
-          })
-          .catch(() => {});
-      }
-    }, 700);
-  };
-
-  const onTimeUpdate = () => {
-    // 拖拽/快进时由 rAF 接管，这里只处理正常播放
-    if (dragStateRef.current.active) return;
-    if (windingRef.current) return;
-    const audio = audioRef.current;
-    if (!audio) return;
-    setCurrentTime(audio.currentTime);
-  };
-
-  const onEnded = () => {
-    setPlaying(false);
-    windingRef.current = null;
-    setWinding(null);
-    if (soundsOnRef.current) {
-      const eng = tapeSounds.ensure();
-      eng.setHiss(false);
-      eng.brake();
-    }
-    setCurrentTime(0);
-    if (audioRef.current) {
-      audioRef.current.currentTime = 0;
-      audioRef.current.playbackRate = 1;
-    }
-  };
-
-  const onAudioError = () => {
-    const audio = audioRef.current;
-    if (track?.url?.includes("music.163.com")) {
-      setError(
-        "网易云音频加载失败，通常因版权保护。请尝试本地上传或使用示例曲目。"
-      );
-    } else if (audio?.error) {
-      setError(
-        `音频加载失败（错误码 ${audio.error.code}）。请检查文件或网络。`
-      );
-    }
-    setPlaying(false);
-  };
-
-  // 音量同步
-  useEffect(() => {
-    if (audioRef.current) {
-      audioRef.current.volume = muted ? 0 : volume;
-    }
-  }, [volume, muted]);
-
-  // 进度条 seek（手动拖动进度条）
+  // 进度条 seek
   const onProgressChange = (t: number) => {
-    const audio = audioRef.current;
-    if (audio) {
-      audio.playbackRate = 1;
-      try {
-        audio.currentTime = t;
-      } catch {
-        /* ignore */
-      }
+    const eng = audio.getEngine();
+    if (eng) {
+      eng.setRate(1);
+      eng.seek(t);
     }
     setCurrentTime(t);
   };
@@ -742,7 +636,6 @@ export function CassettePlayer() {
   const VolumeIcon =
     muted || volume === 0 ? VolumeX : volume < 0.5 ? Volume1 : Volume2;
 
-  // 当前速率显示文案
   const rateLabel =
     liveRate === 0
       ? "—"
@@ -754,16 +647,6 @@ export function CassettePlayer() {
 
   return (
     <div className="w-full max-w-3xl mx-auto">
-      <audio
-        ref={audioRef}
-        src={track?.url || undefined}
-        onLoadedMetadata={onLoadedMetadata}
-        onTimeUpdate={onTimeUpdate}
-        onEnded={onEnded}
-        onError={onAudioError}
-        preload="metadata"
-      />
-
       {/* 磁带本体 */}
       <div className="relative rounded-2xl p-3 sm:p-5 bg-gradient-to-b from-stone-100 to-stone-200 dark:from-stone-900 dark:to-stone-950 border border-stone-300 dark:border-stone-700 shadow-2xl">
         <CassetteTape
@@ -796,6 +679,13 @@ export function CassettePlayer() {
         </div>
       ) : null}
 
+      {/* 降级提示 */}
+      {isFallback ? (
+        <div className="mt-2 text-center text-[11px] text-amber-600 dark:text-amber-400">
+          ⚠ 当前音频为跨域源，已降级为 HTML 播放（变调可能不够平滑），本地上传或示例曲目可享完整 Web Audio 体验
+        </div>
+      ) : null}
+
       {/* 传输控制 */}
       <div className="mt-4 p-4 rounded-2xl bg-gradient-to-b from-stone-200 to-stone-300 dark:from-stone-800 dark:to-stone-900 border border-stone-400/40 dark:border-stone-700">
         <TransportControls
@@ -815,7 +705,7 @@ export function CassettePlayer() {
           onEject={eject}
         />
 
-        {/* 进度条（自定义滑块） */}
+        {/* 进度条 */}
         <div className="mt-4 px-1">
           <div className="flex items-center gap-3">
             <span className="text-xs font-mono tabular-nums text-stone-600 dark:text-stone-300 w-10 text-right">
@@ -839,7 +729,6 @@ export function CassettePlayer() {
 
         {/* 音量 + 音效音量 */}
         <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3 px-1">
-          {/* 主音量 */}
           <div className="flex items-center gap-2.5">
             <Button
               variant="ghost"
@@ -867,7 +756,6 @@ export function CassettePlayer() {
             </span>
           </div>
 
-          {/* 磁带音效音量 */}
           <div className="flex items-center gap-2.5">
             <TooltipProvider delayDuration={200}>
               <Tooltip>

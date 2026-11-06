@@ -22,31 +22,25 @@ interface SourceLoaderProps {
   error: string | null;
 }
 
-// 示例曲目（使用公开免版权音频，SoundHelix）
+// 示例曲目（本地托管，支持 Web Audio 连续变调）
 const SAMPLES: Track[] = [
   {
-    url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3",
+    url: "/samples/song-1.mp3",
     name: "Midnight Drive",
     artist: "SoundHelix",
     album: "Open Road EP",
   },
   {
-    url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3",
+    url: "/samples/song-3.mp3",
     name: "Velvet Tape Hiss",
     artist: "SoundHelix",
     album: "Analog Memories",
   },
   {
-    url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-8.mp3",
+    url: "/samples/song-8.mp3",
     name: "Reel To Reel",
     artist: "SoundHelix",
     album: "Magnetic Field",
-  },
-  {
-    url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-10.mp3",
-    name: "Chrome Side B",
-    artist: "SoundHelix",
-    album: "Analog Memories",
   },
 ];
 
