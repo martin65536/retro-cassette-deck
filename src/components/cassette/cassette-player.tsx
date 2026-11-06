@@ -16,7 +16,7 @@ import {
 } from "./cassette-tape";
 import { TransportControls } from "./transport-controls";
 import { SourceLoader, type Track } from "./source-loader";
-import { TapeSlider } from "./tape-slider";
+import { TapeSlider, type TapeSliderHandle } from "./tape-slider";
 import { useTapeSounds } from "@/hooks/use-tape-sounds";
 import { useAudioEngine } from "@/hooks/use-audio-engine";
 import { useCircularDrag } from "@/hooks/use-circular-drag";
@@ -57,7 +57,6 @@ export function CassettePlayer() {
   const [track, setTrack] = useState<Track | null>(null);
   const [playing, setPlaying] = useState(false);
   const [winding, setWinding] = useState<Winding>(null);
-  const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [volume, setVolume] = useState(0.85);
   const [muted, setMuted] = useState(false);
@@ -65,11 +64,9 @@ export function CassettePlayer() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [soundsOn, setSoundsOn] = useState(true);
-  const [liveRate, setLiveRate] = useState(1);
-  const [isFallback, setIsFallback] = useState(false);
+  const [progress, setProgress] = useState(0); // 低频更新（磁带半径视觉）
 
   const hasTape = track !== null;
-  const progress = duration > 0 ? currentTime / duration : 0;
 
   // ===== refs =====
   const leftReelElRef = useRef<SVGGElement | null>(null);
@@ -77,12 +74,18 @@ export function CassettePlayer() {
   const leftAngleRef = useRef(0);
   const rightAngleRef = useRef(0);
 
+  // DOM refs：rAF 直接更新 DOM，避免每帧 setState 重渲染（CPU 优化）
+  const progressSliderRef = useRef<TapeSliderHandle | null>(null);
+  const currentTimeLabelRef = useRef<HTMLSpanElement | null>(null);
+  const rateBadgeRef = useRef<HTMLSpanElement | null>(null);
+
   const playingRef = useRef(false);
   const windingRef = useRef<Winding>(null);
   const hasTapeRef = useRef(false);
   const durationRef = useRef(0);
   const soundsOnRef = useRef(true);
   const rafRef = useRef<number | null>(null);
+  const progressFrameRef = useRef(0); // 节流计数（磁带半径每 6 帧更新一次）
 
   // 拖拽状态
   const dragStateRef = useRef({
@@ -98,13 +101,37 @@ export function CassettePlayer() {
   const tapeSounds = useTapeSounds();
   const audio = useAudioEngine();
 
+  // DOM 直接更新辅助函数：rAF 高频调用，不触发 React 重渲染（CPU 优化核心）
+  const updateUI = useCallback((time: number, rate: number) => {
+    if (progressSliderRef.current) progressSliderRef.current.setValue(time);
+    if (currentTimeLabelRef.current)
+      currentTimeLabelRef.current.textContent = formatTime(time);
+    if (rateBadgeRef.current) {
+      const label =
+        rate === 0
+          ? "—"
+          : rate < 0.95
+            ? `${rate.toFixed(2)}× ↓`
+            : rate > 1.05
+              ? `${rate.toFixed(2)}× ↑`
+              : "1.00×";
+      rateBadgeRef.current.textContent = label;
+    }
+    // 磁带半径节流：每 6 帧才 setState（~10fps，仅重渲染磁带半径）
+    progressFrameRef.current++;
+    if (progressFrameRef.current >= 6) {
+      progressFrameRef.current = 0;
+      const dur = durationRef.current;
+      setProgress(dur > 0 ? time / dur : 0);
+    }
+  }, []);
+
   // 回调绑定
   audio.onEndedRef.current = () => {
     setPlaying(false);
     windingRef.current = null;
     setWinding(null);
-    setCurrentTime(0);
-    setLiveRate(1);
+    updateUI(0, 1);
     if (soundsOnRef.current) {
       const eng = tapeSounds.ensure();
       eng.setHiss(false);
@@ -114,8 +141,6 @@ export function CassettePlayer() {
   audio.onLoadedRef.current = (dur) => {
     setDuration(dur);
     durationRef.current = dur;
-    const eng = audio.getEngine();
-    setIsFallback(eng?.isFallback ?? false);
     if (soundsOnRef.current) {
       tapeSounds.ensure().load();
     }
@@ -208,10 +233,8 @@ export function CassettePlayer() {
             DRAG_MAX_RATE
           );
           eng.setRate(rate);
-          setLiveRate(rate);
+          updateUI(eng.currentTime, rate);
           if (!eng.isPlaying) eng.play();
-          // 同步 UI 时间
-          setCurrentTime(eng.currentTime);
         } else if (ds.direction === "backward") {
           // 逆时针：暂停 source + 手动倒退 playhead（精确）
           if (eng.isPlaying) eng.pause();
@@ -222,12 +245,11 @@ export function CassettePlayer() {
           rewindSpeed = clamp(rewindSpeed, 0, 12);
           const newTime = eng.currentTime - rewindSpeed * dt;
           eng.setPlayhead(newTime);
-          setCurrentTime(eng.currentTime);
-          setLiveRate(0);
+          updateUI(eng.currentTime, 0);
         } else {
           // direction=none：刚按下
           eng.setRate(0.0625);
-          setLiveRate(0.0625);
+          updateUI(eng.currentTime, 0.0625);
         }
 
         // 带卷视觉跟随角速度
@@ -251,23 +273,20 @@ export function CassettePlayer() {
             // 快进：保持播放，rate=FF_RATE（连续变调）
             eng.setRate(FF_RATE);
             if (!eng.isPlaying) eng.play();
-            setLiveRate(FF_RATE);
-            setCurrentTime(eng.currentTime);
+            updateUI(eng.currentTime, FF_RATE);
           } else {
             // 快退：暂停 + 倒退 playhead
             if (eng.isPlaying) eng.pause();
             const newTime = eng.currentTime - WIND_REWIND_SPEED * dt;
             eng.setPlayhead(newTime);
-            setCurrentTime(eng.currentTime);
-            setLiveRate(0);
+            updateUI(eng.currentTime, 0);
             if (eng.currentTime <= 0.05) stopWindingRef.current();
           }
         } else if (playingRef.current && eng) {
           eng.setRate(1);
-          setLiveRate(1);
-          setCurrentTime(eng.currentTime);
+          updateUI(eng.currentTime, 1);
         } else {
-          setLiveRate(eng?.isPlaying ? eng.currentRate : 0);
+          updateUI(eng?.currentTime ?? 0, eng?.isPlaying ? eng.currentRate : 0);
         }
 
         // 带卷旋转
@@ -338,8 +357,7 @@ export function CassettePlayer() {
     setPlaying(false);
     setWinding(null);
     windingRef.current = null;
-    setCurrentTime(0);
-    setLiveRate(0);
+    updateUI(0, 0);
     if (soundsOnRef.current) {
       const sEng = tapeSounds.ensure();
       sEng.brake();
@@ -406,12 +424,11 @@ export function CassettePlayer() {
     setPlaying(false);
     setWinding(null);
     windingRef.current = null;
-    setCurrentTime(0);
+    updateUI(0, 0);
     setDuration(0);
     durationRef.current = 0;
     setTrack(null);
     hasTapeRef.current = false;
-    setIsFallback(false);
     leftAngleRef.current = 0;
     rightAngleRef.current = 0;
     applyReelTransform();
@@ -554,11 +571,10 @@ export function CassettePlayer() {
       setPlaying(false);
       setWinding(null);
       windingRef.current = null;
-      setCurrentTime(0);
+      updateUI(0, 0);
       setDuration(0);
       durationRef.current = 0;
       setError(null);
-      setIsFallback(false);
       leftAngleRef.current = 0;
       rightAngleRef.current = 0;
       setTrack(newTrack);
@@ -598,8 +614,9 @@ export function CassettePlayer() {
           return;
         }
         const song = data.data;
+        // 用后端代理音频流（同源），使 Web Audio 能 fetch + decode 成 AudioBuffer
         await loadTrack({
-          url: song.url,
+          url: `/api/netease/audio?id=${song.id}`,
           name: song.name,
           artist: song.artist,
           album: song.album,
@@ -630,20 +647,11 @@ export function CassettePlayer() {
       eng.setRate(1);
       eng.seek(t);
     }
-    setCurrentTime(t);
+    updateUI(t, 1);
   };
 
   const VolumeIcon =
     muted || volume === 0 ? VolumeX : volume < 0.5 ? Volume1 : Volume2;
-
-  const rateLabel =
-    liveRate === 0
-      ? "—"
-      : liveRate < 0.95
-        ? `${liveRate.toFixed(2)}× ↓`
-        : liveRate > 1.05
-          ? `${liveRate.toFixed(2)}× ↑`
-          : "1.00×";
 
   return (
     <div className="w-full max-w-3xl mx-auto">
@@ -674,15 +682,8 @@ export function CassettePlayer() {
           </span>
           <span className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-orange-950/60 border border-orange-700/40 text-orange-300 font-mono">
             <Waves className="w-3 h-3" />
-            {rateLabel}
+            <span ref={rateBadgeRef}>1.00×</span>
           </span>
-        </div>
-      ) : null}
-
-      {/* 降级提示 */}
-      {isFallback ? (
-        <div className="mt-2 text-center text-[11px] text-amber-600 dark:text-amber-400">
-          ⚠ 当前音频为跨域源，已降级为 HTML 播放（变调可能不够平滑），本地上传或示例曲目可享完整 Web Audio 体验
         </div>
       ) : null}
 
@@ -708,11 +709,12 @@ export function CassettePlayer() {
         {/* 进度条 */}
         <div className="mt-4 px-1">
           <div className="flex items-center gap-3">
-            <span className="text-xs font-mono tabular-nums text-stone-600 dark:text-stone-300 w-10 text-right">
-              {formatTime(currentTime)}
+            <span ref={currentTimeLabelRef} className="text-xs font-mono tabular-nums text-stone-600 dark:text-stone-300 w-10 text-right">
+              0:00
             </span>
             <TapeSlider
-              value={currentTime}
+              ref={progressSliderRef}
+              value={0}
               min={0}
               max={duration > 0 ? duration : 1}
               step={0.1}

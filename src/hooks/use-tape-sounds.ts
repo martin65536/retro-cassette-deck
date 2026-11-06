@@ -29,6 +29,7 @@ class TapeSoundEngine {
   private windLfoGain: GainNode | null = null;
 
   private started = false;
+  private sourcesActive = false; // 持续源（hiss/wind）是否在运行
 
   /** 必须在用户交互后调用，以解锁 AudioContext */
   init() {
@@ -43,9 +44,9 @@ class TapeSoundEngine {
     this.masterGain.connect(this.ctx.destination);
 
     this.noiseBuffer = this.createNoiseBuffer();
-    this.setupHiss();
-    this.setupWind();
     this.started = true;
+    // 仅当音量 >0 时才启动持续源
+    if (this.sfxVolume > 0) this.startContinuousSources();
   }
 
   resume() {
@@ -114,9 +115,37 @@ class TapeSoundEngine {
     this.windLfo.start();
   }
 
+  /** 启动持续源（hiss + wind） */
+  private startContinuousSources() {
+    if (!this.ctx || this.sourcesActive) return;
+    this.setupHiss();
+    this.setupWind();
+    this.sourcesActive = true;
+  }
+
+  /** 停止持续源（释放 CPU，sfxVolume=0 时调用） */
+  private stopContinuousSources() {
+    if (!this.sourcesActive) return;
+    try { this.hissSource?.stop(); } catch { /* ignore */ }
+    try { this.windSource?.stop(); } catch { /* ignore */ }
+    try { this.windLfo?.stop(); } catch { /* ignore */ }
+    try { this.hissSource?.disconnect(); } catch { /* ignore */ }
+    try { this.windSource?.disconnect(); } catch { /* ignore */ }
+    try { this.windLfo?.disconnect(); } catch { /* ignore */ }
+    this.hissSource = null;
+    this.hissGain = null;
+    this.hissFilter = null;
+    this.windSource = null;
+    this.windGain = null;
+    this.windFilter = null;
+    this.windLfo = null;
+    this.windLfoGain = null;
+    this.sourcesActive = false;
+  }
+
   /** 设置摩擦声 (播放时为 true) */
   setHiss(active: boolean, volume = 0.05) {
-    if (!this.ctx || !this.hissGain) return;
+    if (!this.sourcesActive || !this.ctx || !this.hissGain) return;
     const now = this.ctx.currentTime;
     this.hissGain.gain.cancelScheduledValues(now);
     this.hissGain.gain.setTargetAtTime(active ? volume : 0, now, 0.08);
@@ -128,7 +157,7 @@ class TapeSoundEngine {
    * @param forward 是否正向（快进/快退音色略不同）
    */
   setWind(speed: number, forward: boolean) {
-    if (!this.ctx || !this.windGain || !this.windFilter || !this.windLfo)
+    if (!this.sourcesActive || !this.ctx || !this.windGain || !this.windFilter || !this.windLfo)
       return;
     const now = this.ctx.currentTime;
     const s = Math.max(0, Math.min(1, speed));
@@ -294,7 +323,7 @@ class TapeSoundEngine {
   // 磁带音效总音量 (0~1)，可外部调节
   private sfxVolume = 0.6;
 
-  /** 设置磁带机械音效总音量 (0~1) */
+  /** 设置磁带机械音效总音量 (0~1)；0 时休眠持续源，>0 时唤醒 */
   setSfxVolume(v: number) {
     this.sfxVolume = Math.max(0, Math.min(1, v));
     if (!this.ctx || !this.masterGain) return;
@@ -303,6 +332,13 @@ class TapeSoundEngine {
       this.ctx.currentTime,
       0.03
     );
+    // 音量归 0：停止持续源（释放 CPU）
+    if (this.sfxVolume <= 0.001 && this.sourcesActive) {
+      this.stopContinuousSources();
+    } else if (this.sfxVolume > 0.001 && !this.sourcesActive && this.started) {
+      // 从 0 恢复：重新启动持续源
+      this.startContinuousSources();
+    }
   }
 
   dispose() {

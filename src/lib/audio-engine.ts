@@ -10,8 +10,7 @@
  * - 播放位置 playhead 完全由引擎掌控，可正向推进、可倒退
  * - 倒带：stop source + 手动倒退 playhead + 卷带音效（真实磁带行为）
  *
- * CORS 降级：跨域音频无法 fetch/decode 时，回退到 HTML audio 元素
- * （此时变调为阶跃，但至少能播放）
+ * 所有音频（含网易云，经后端代理同源）均 fetch + decode 成 AudioBuffer
  */
 
 export interface AudioEngineCallbacks {
@@ -20,7 +19,7 @@ export interface AudioEngineCallbacks {
   onError?: (msg: string) => void;
 }
 
-const MIN_RATE = 0.0625; // 浏览器/Web Audio 最小 playbackRate
+const MIN_RATE = 0.0625;
 const MAX_RATE = 6;
 
 const clamp = (v: number, lo: number, hi: number) =>
@@ -32,16 +31,15 @@ export class TapeAudioEngine {
   private source: AudioBufferSourceNode | null = null;
   private gain: GainNode | null = null;
 
-  // 降级模式（HTML audio）
-  private fallbackEl: HTMLAudioElement | null = null;
-  private useFallback = false;
-
-  private playhead = 0; // 当前播放位置（秒）
+  private playhead = 0;
   private playing = false;
   private targetRate = 1;
   private smoothedRate = 1;
   private volume = 0.85;
   private cb: AudioEngineCallbacks;
+
+  // 性能：缓存 duration
+  private cachedDuration = 0;
 
   constructor(cb: AudioEngineCallbacks = {}) {
     this.cb = cb;
@@ -60,126 +58,64 @@ export class TapeAudioEngine {
   }
 
   resume() {
-    this.ctx?.resume();
-    if (this.useFallback && this.fallbackEl) {
-      this.fallbackEl.play().catch(() => {});
+    if (this.ctx && this.ctx.state === "suspended") {
+      this.ctx.resume().catch(() => {});
     }
   }
 
   get currentTime() {
-    if (this.useFallback) return this.fallbackEl?.currentTime ?? 0;
     return this.playhead;
   }
 
   get duration() {
-    if (this.useFallback) return this.fallbackEl?.duration ?? 0;
-    return this.buffer?.duration ?? 0;
+    return this.cachedDuration;
   }
 
   get isPlaying() {
-    if (this.useFallback) return !this.fallbackEl?.paused;
     return this.playing;
   }
 
   get currentRate() {
-    return this.useFallback ? this.targetRate : this.smoothedRate;
+    return this.smoothedRate;
   }
 
   get isFallback() {
-    return this.useFallback;
+    return false;
   }
 
   /**
-   * 加载音频
-   * 先尝试 fetch + decodeAudioData（Web Audio，支持连续变调）
-   * 失败（CORS）则降级到 HTML audio
+   * 加载音频：fetch + decodeAudioData（所有 URL 均同源或经代理）
    */
   async load(url: string): Promise<void> {
     this.ensureCtx();
     this.stopSource();
-    if (this.fallbackEl) {
-      this.fallbackEl.pause();
-      this.fallbackEl = null;
-    }
-    this.useFallback = false;
     this.buffer = null;
     this.playhead = 0;
     this.smoothedRate = 1;
     this.targetRate = 1;
+    this.cachedDuration = 0;
 
-    // blob URL（本地上传）或同源 URL 可以 fetch
-    const isBlob = url.startsWith("blob:");
-    const isSameOrigin =
-      typeof window !== "undefined" &&
-      (url.startsWith(window.location.origin) ||
-        url.startsWith("/") ||
-        url.startsWith("./"));
-
-    if (isBlob || isSameOrigin) {
-      try {
-        const res = await fetch(url);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const arr = await res.arrayBuffer();
-        this.buffer = await this.ctx!.decodeAudioData(arr);
-        this.playhead = 0;
-        this.cb.onLoaded?.(this.buffer.duration);
-        return;
-      } catch {
-        // 继续降级
+    try {
+      const res = await fetch(url);
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
       }
-    } else {
-      // 跨域：尝试 fetch（部分服务器支持 CORS）
-      try {
-        const res = await fetch(url, { mode: "cors" });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const arr = await res.arrayBuffer();
-        this.buffer = await this.ctx!.decodeAudioData(arr);
-        this.playhead = 0;
-        this.cb.onLoaded?.(this.buffer.duration);
-        return;
-      } catch {
-        // 降级
-      }
+      const arr = await res.arrayBuffer();
+      // decodeAudioData 可能返回 Promise 或用回调（旧 Safari），这里用 Promise 形式
+      this.buffer = await this.ctx!.decodeAudioData(arr);
+      this.cachedDuration = this.buffer.duration;
+      this.cb.onLoaded?.(this.buffer.duration);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      this.cb.onError?.(`音频解码失败：${msg}`);
+      throw e;
     }
-
-    // 降级到 HTML audio
-    this.useFallback = true;
-    this.fallbackEl = new Audio();
-    this.fallbackEl.src = url;
-    this.fallbackEl.preload = "metadata";
-    this.fallbackEl.volume = this.volume;
-    (
-      this.fallbackEl as HTMLAudioElement & {
-        preservesPitch?: boolean;
-        mozPreservesPitch?: boolean;
-        webkitPreservesPitch?: boolean;
-      }
-    ).preservesPitch = false;
-    (
-      this.fallbackEl as HTMLAudioElement & { mozPreservesPitch?: boolean }
-    ).mozPreservesPitch = false;
-    (
-      this.fallbackEl as HTMLAudioElement & {
-        webkitPreservesPitch?: boolean;
-      }
-    ).webkitPreservesPitch = false;
-    this.fallbackEl.onloadedmetadata = () => {
-      this.cb.onLoaded?.(this.fallbackEl?.duration ?? 0);
-    };
-    this.fallbackEl.onended = () => this.cb.onEnded?.();
-    this.fallbackEl.onerror = () => this.cb.onError?.("音频加载失败");
   }
 
   play(offset?: number) {
     this.ensureCtx();
     if (this.ctx && this.ctx.state === "suspended") {
       this.ctx.resume().catch(() => {});
-    }
-    if (this.useFallback) {
-      if (offset != null && this.fallbackEl)
-        this.fallbackEl.currentTime = offset;
-      this.fallbackEl?.play().catch(() => {});
-      return;
     }
     if (offset != null) this.playhead = offset;
     this.startSource();
@@ -193,6 +129,7 @@ export class TapeAudioEngine {
     this.source.connect(this.gain);
     this.source.playbackRate.value = this.smoothedRate;
     this.source.onended = () => {
+      // 自然播完（非主动 stop）
       if (this.playing) {
         this.playing = false;
         this.playhead = 0;
@@ -201,7 +138,7 @@ export class TapeAudioEngine {
         this.cb.onEnded?.();
       }
     };
-    const offset = clamp(this.playhead, 0, this.buffer.duration - 0.02);
+    const offset = clamp(this.playhead, 0, this.cachedDuration - 0.02);
     try {
       this.source.start(0, offset);
       this.playing = true;
@@ -229,10 +166,6 @@ export class TapeAudioEngine {
   }
 
   pause() {
-    if (this.useFallback) {
-      this.fallbackEl?.pause();
-      return;
-    }
     this.stopSource();
   }
 
@@ -241,25 +174,13 @@ export class TapeAudioEngine {
     this.setPlayhead(0);
   }
 
-  /** 直接设置播放位置（不重启 source，用于倒带每帧调用） */
+  /** 直接设置播放位置（不重启 source，倒带每帧调用） */
   setPlayhead(time: number) {
-    const dur = this.duration;
-    this.playhead = clamp(time, 0, dur > 0 ? dur : 0);
-    if (this.useFallback && this.fallbackEl) {
-      try {
-        this.fallbackEl.currentTime = this.playhead;
-      } catch {
-        /* ignore */
-      }
-    }
+    this.playhead = clamp(time, 0, this.cachedDuration > 0 ? this.cachedDuration : 0);
   }
 
   /** seek：重启 source 到目标位置（拖动进度条用） */
   seek(time: number) {
-    if (this.useFallback) {
-      this.setPlayhead(time);
-      return;
-    }
     const wasPlaying = this.playing;
     this.stopSource();
     this.setPlayhead(time);
@@ -269,21 +190,10 @@ export class TapeAudioEngine {
   /** 设置目标倍速（平滑过渡由 tick 处理） */
   setRate(rate: number) {
     this.targetRate = clamp(rate, MIN_RATE, MAX_RATE);
-    if (this.useFallback && this.fallbackEl) {
-      try {
-        this.fallbackEl.playbackRate = this.targetRate;
-      } catch {
-        /* ignore */
-      }
-    }
   }
 
   setVolume(v: number) {
     this.volume = clamp(v, 0, 1);
-    if (this.useFallback && this.fallbackEl) {
-      this.fallbackEl.volume = this.volume;
-      return;
-    }
     if (this.gain && this.ctx) {
       this.gain.gain.setTargetAtTime(
         this.volume,
@@ -300,17 +210,14 @@ export class TapeAudioEngine {
    */
   tick(dt: number) {
     // 平滑 rate（指数移动平均），让音调连续滑动
-    const smoothFactor = Math.min(1, dt * 18); // ~55ms 时间常数
+    const smoothFactor = Math.min(1, dt * 18);
     this.smoothedRate +=
       (this.targetRate - this.smoothedRate) * smoothFactor;
-
-    if (this.useFallback) return;
 
     if (this.playing && this.source) {
       this.source.playbackRate.value = this.smoothedRate;
       this.playhead += dt * this.smoothedRate;
-      const dur = this.buffer?.duration ?? 0;
-      if (this.playhead >= dur) {
+      if (this.playhead >= this.cachedDuration) {
         this.playhead = 0;
         this.stopSource();
         this.smoothedRate = 1;
@@ -319,10 +226,9 @@ export class TapeAudioEngine {
       }
     }
   }
+
   dispose() {
     this.stopSource();
-    this.fallbackEl?.pause();
-    this.fallbackEl = null;
     this.ctx?.close();
     this.ctx = null;
   }
