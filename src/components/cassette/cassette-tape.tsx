@@ -1,5 +1,7 @@
 "use client";
 
+import React from "react";
+
 export type Winding = "forward" | "rewind" | null;
 
 export interface CassetteTapeProps {
@@ -83,11 +85,13 @@ interface ReelProps {
 }
 
 /**
- * 单个带卷。
+ * 单个带卷（React 类组件）。
  * 外层 <g> 的 transform 由主组件通过 ref 直接设置（rotate），以避免每帧 React 重渲染。
  */
-function Reel({ cx, cy, tapeR, reelRef, onPointerDown }: ReelProps) {
-  return (
+class Reel extends React.Component<ReelProps> {
+  render() {
+    const { cx, cy, tapeR, reelRef, onPointerDown } = this.props;
+    return (
     <g
       ref={reelRef}
       onPointerDown={onPointerDown}
@@ -197,22 +201,24 @@ function Reel({ cx, cy, tapeR, reelRef, onPointerDown }: ReelProps) {
         );
       })}
     </g>
-  );
+    );
+  }
 }
 
-export function CassetteTape(props: CassetteTapeProps) {
-  const {
-    progress,
-    name,
-    artist,
-    album,
-    playing,
-    winding,
-    hasTape,
-    leftReelRef,
-    rightReelRef,
-    onReelPointerDown,
-  } = props;
+export class CassetteTape extends React.Component<CassetteTapeProps> {
+  render() {
+    const {
+      progress,
+      name,
+      artist,
+      album,
+      playing,
+      winding,
+      hasTape,
+      leftReelRef,
+      rightReelRef,
+      onReelPointerDown,
+    } = this.props;
 
   const leftTapeR = tapeRadius(progress, true);
   const rightTapeR = tapeRadius(progress, false);
@@ -533,3 +539,4 @@ export function CassetteTape(props: CassetteTapeProps) {
       </svg>
     );
   }
+}
