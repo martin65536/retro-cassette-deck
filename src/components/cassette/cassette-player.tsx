@@ -21,11 +21,13 @@ import { Button } from "@/components/ui/button";
 
 // 带卷视觉旋转速度（度/秒）
 const PLAY_DEG_PER_SEC = 80;
-const WIND_DEG_PER_SEC = 760;
-const WIND_REWIND_SPEED = 8;
-const FF_RATE = 4;
+// 真实磁带机快进/快退带卷转速（很快）
+const WIND_DEG_PER_SEC = 1400;
+// 快进/快退音频倍速（真实磁带约 ×15）
+const FF_RATE = 15;
+const REWIND_RATE = 15;
 const NORMAL_OMEGA = (PLAY_DEG_PER_SEC * Math.PI) / 180;
-const DRAG_MAX_RATE = 5;
+const DRAG_MAX_RATE = 8;
 
 function formatTime(s: number): string {
   if (!isFinite(s) || s < 0) s = 0;
@@ -112,6 +114,10 @@ export class CassettePlayer extends React.Component<Record<string, never>, Playe
     omega: 0,
     lastRotateTime: 0,
   };
+
+  // 带卷惯性：快进/快退松手后带卷继续转并衰减（音频立即停）
+  // velocity: deg/s，正值=快进方向（左卷逆时针/右卷顺时针）
+  private reelInertia = { active: false, velocity: 0 };
 
   componentDidMount() {
     this.progressSlider = this.progressSliderRef.current;
@@ -286,9 +292,9 @@ export class CassettePlayer extends React.Component<Record<string, never>, Playe
             this.updateUI(eng.currentTime, FF_RATE);
           } else {
             eng.setReverse(true);
-            eng.setRate(WIND_REWIND_SPEED);
+            eng.setRate(REWIND_RATE);
             if (!eng.isPlaying) eng.play();
-            this.updateUI(eng.currentTime, -WIND_REWIND_SPEED);
+            this.updateUI(eng.currentTime, -REWIND_RATE);
             if (eng.currentTime <= 0.05) this.stopWinding();
           }
         } else if (this.playing && eng) {
@@ -310,11 +316,28 @@ export class CassettePlayer extends React.Component<Record<string, never>, Playe
         }
       }
 
+      // 带卷惯性：快进/快退松手后带卷继续转并衰减
+      if (this.reelInertia.active && this.hasTape) {
+        const v = this.reelInertia.velocity;
+        // velocity>0 = 快进方向（左卷逆时针/右卷顺时针）
+        this.leftAngle -= v * dt;
+        this.rightAngle += v * dt;
+        // 指数衰减，约 1.2 秒停
+        this.reelInertia.velocity *= Math.pow(0.05, dt);
+        if (Math.abs(this.reelInertia.velocity) < 2) {
+          this.reelInertia.active = false;
+          this.reelInertia.velocity = 0;
+        }
+      }
+
       // 每帧绘制 Canvas
       this.drawCanvas();
 
       const active =
-        this.playing || this.winding !== null || this.dragState.active;
+        this.playing ||
+        this.winding !== null ||
+        this.dragState.active ||
+        this.reelInertia.active;
       if (active) {
         this.rafId = requestAnimationFrame(loop);
       } else {
@@ -420,7 +443,7 @@ export class CassettePlayer extends React.Component<Record<string, never>, Playe
       this.playing = true;
     } else {
       this.audio.setReverse(true);
-      this.audio.setRate(WIND_REWIND_SPEED);
+      this.audio.setRate(REWIND_RATE);
       if (!this.audio.isPlaying) this.audio.play();
       this.setState({ playing: false });
       this.playing = false;
@@ -441,8 +464,13 @@ export class CassettePlayer extends React.Component<Record<string, never>, Playe
   private stopWinding = () => {
     if (!this.winding) return;
     const wasForward = this.winding === "forward";
+    // 触发带卷惯性：松手后带卷继续转并衰减（音频立即停）
+    this.reelInertia.active = true;
+    this.reelInertia.velocity = wasForward ? WIND_DEG_PER_SEC : -WIND_DEG_PER_SEC;
     this.setState({ winding: null });
     this.winding = null;
+    // 音频立即停止
+    this.audio.pause();
     this.audio.setReverse(false);
     this.audio.setRate(1);
     if (this.soundsOn) {
@@ -459,6 +487,7 @@ export class CassettePlayer extends React.Component<Record<string, never>, Playe
     } else {
       this.updateUI(this.audio.currentTime, 1);
     }
+    this.ensureRAF();
   };
 
   private eject = () => {
