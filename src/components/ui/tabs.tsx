@@ -32,7 +32,7 @@ class TabsList extends React.Component<TabsListProps> {
         data-slot="tabs-list"
         className={cn(
           "inline-flex h-9 w-full items-center justify-center rounded-none p-[3px]",
-          "bg-white border border-black",
+          "bg-stone-900 border border-black",
           className
         )}
         {...props}
@@ -49,10 +49,10 @@ class TabsTrigger extends React.Component<TabsTriggerProps> {
         data-slot="tabs-trigger"
         className={cn(
           "inline-flex h-[calc(100%-1px)] flex-1 items-center justify-center gap-1.5 rounded-none px-2 py-1 text-sm font-medium whitespace-nowrap transition-all",
-          "text-gray-500",
-          "hover:text-black hover:bg-gray-100",
-          "data-[state=active]:bg-black data-[state=active]:text-white",
-          "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-black",
+          "text-stone-500",
+          "hover:text-stone-200 hover:bg-stone-800",
+          "data-[state=active]:bg-stone-700 data-[state=active]:text-amber-400",
+          "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-amber-500",
           "disabled:pointer-events-none disabled:opacity-50",
           "[&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
           className

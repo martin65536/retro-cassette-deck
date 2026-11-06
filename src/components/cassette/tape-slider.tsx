@@ -148,10 +148,10 @@ export class TapeSlider extends React.Component<
           }}
           className={[
             "relative w-full",
-            isProgress ? "h-1" : "h-0.5",
-            "bg-gray-200 border border-black",
+            isProgress ? "h-1.5" : "h-1",
+            "bg-black",
           ].join(" ")}
-          style={{ touchAction: "none" }}
+          style={{ touchAction: "none", border: "1px solid #000", boxShadow: "inset 0 1px 0 #1a1a1a" }}
         >
           <div
             ref={(el) => {
@@ -159,7 +159,7 @@ export class TapeSlider extends React.Component<
             }}
             className={[
               "absolute inset-y-0 left-0",
-              "bg-black",
+              isProgress ? "bg-amber-500" : "bg-stone-500",
             ].join(" ")}
             style={{ width: `${pct}%` }}
           />
@@ -169,14 +169,13 @@ export class TapeSlider extends React.Component<
             }}
             className={[
               "absolute top-1/2 -translate-y-1/2 -translate-x-1/2",
-              "border border-black",
               isProgress
-                ? "w-3.5 h-3.5 bg-white"
-                : "w-3 h-3 bg-white",
+                ? "w-3.5 h-3.5 bg-stone-200"
+                : "w-3 h-3 bg-stone-400",
               "transition-transform duration-75",
-              dragging ? "scale-110 bg-black" : "group-hover:bg-gray-200",
+              dragging ? "scale-110 bg-amber-400" : "",
             ].join(" ")}
-            style={{ left: `${pct}%` }}
+            style={{ left: `${pct}%`, border: "1px solid #000" }}
           />
         </div>
       </div>

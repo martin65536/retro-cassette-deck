@@ -163,126 +163,147 @@ export class CassetteCanvas extends React.Component<CassetteCanvasProps> {
     ctx.closePath();
   }
 
-  // ===== 外壳：纯白底 + 黑边 + 顶底细线 =====
+  // ===== 外壳：深色拟物机身，纯色叠层模拟立体 =====
   private drawShell(ctx: CanvasRenderingContext2D) {
-    // 主体白底，极小圆角（2px）
-    ctx.fillStyle = "#fafafa";
-    this.roundRect(ctx, 4, 4, W - 8, H - 8, 2);
-    ctx.fill();
-    // 外黑边 1px
-    ctx.strokeStyle = "#0a0a0a";
-    ctx.lineWidth = 1;
-    this.roundRect(ctx, 4, 4, W - 8, H - 8, 2);
-    ctx.stroke();
-    // 顶部细线（标签上分隔）
-    ctx.beginPath();
-    ctx.moveTo(4, 100);
-    ctx.lineTo(W - 4, 100);
-    ctx.stroke();
+    // 外层黑框
+    ctx.fillStyle = "#0a0a0a";
+    ctx.fillRect(2, 2, W - 4, H - 4);
+    // 主体深灰机身
+    ctx.fillStyle = "#2a2a2e";
+    ctx.fillRect(4, 4, W - 8, H - 8);
+    // 顶部高光线（1px 浅色，模拟金属反光）
+    ctx.fillStyle = "#3e3e44";
+    ctx.fillRect(4, 4, W - 8, 1);
+    // 底部阴影线（1px 黑色）
+    ctx.fillStyle = "#000";
+    ctx.fillRect(4, H - 5, W - 8, 1);
+    // 顶部细线（标签上分隔，内陷效果）
+    ctx.fillStyle = "#000";
+    ctx.fillRect(4, 100, W - 8, 1);
+    ctx.fillStyle = "#3e3e44";
+    ctx.fillRect(4, 101, W - 8, 1);
     // 底部细线（磁头窗口上分隔）
-    ctx.beginPath();
-    ctx.moveTo(4, 244);
-    ctx.lineTo(W - 4, 244);
-    ctx.stroke();
+    ctx.fillStyle = "#000";
+    ctx.fillRect(4, 244, W - 8, 1);
+    ctx.fillStyle = "#3e3e44";
+    ctx.fillRect(4, 245, W - 8, 1);
   }
 
-  // ===== 四角十字螺丝 =====
+  // ===== 四角十字螺丝（金属质感）=====
   private drawScrews(ctx: CanvasRenderingContext2D) {
     const pos = [
-      [16, 16],
-      [W - 16, 16],
-      [16, H - 16],
-      [W - 16, H - 16],
+      [18, 18],
+      [W - 18, 18],
+      [18, H - 18],
+      [W - 18, H - 18],
     ];
     for (const [x, y] of pos) {
-      // 螺丝圆
-      ctx.fillStyle = "#e0e0e0";
+      // 螺丝外圈（深色凹陷）
+      ctx.fillStyle = "#000";
       ctx.beginPath();
-      ctx.arc(x, y, 3.5, 0, Math.PI * 2);
+      ctx.arc(x, y, 5, 0, Math.PI * 2);
       ctx.fill();
-      ctx.strokeStyle = "#999";
-      ctx.lineWidth = 0.5;
-      ctx.stroke();
-      // 十字槽
-      ctx.strokeStyle = "#666";
-      ctx.lineWidth = 1;
+      // 螺丝金属面
+      ctx.fillStyle = "#5a5a60";
       ctx.beginPath();
-      ctx.moveTo(x - 2, y);
-      ctx.lineTo(x + 2, y);
-      ctx.moveTo(x, y - 2);
-      ctx.lineTo(x, y + 2);
+      ctx.arc(x, y, 4, 0, Math.PI * 2);
+      ctx.fill();
+      // 高光（左上）
+      ctx.fillStyle = "#7a7a80";
+      ctx.beginPath();
+      ctx.arc(x - 0.8, y - 0.8, 2.5, 0, Math.PI * 2);
+      ctx.fill();
+      // 十字槽
+      ctx.strokeStyle = "#1a1a1a";
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.moveTo(x - 2.5, y);
+      ctx.lineTo(x + 2.5, y);
+      ctx.moveTo(x, y - 2.5);
+      ctx.lineTo(x, y + 2.5);
       ctx.stroke();
     }
   }
 
-  // ===== 标签区 =====
+  // ===== 标签区（凹陷纸标签，纯色叠层）=====
   private drawLabel(
     ctx: CanvasRenderingContext2D,
     state: CassetteDrawState
   ) {
+    // 标签纸内陷凹槽（深色边框 + 浅色纸面）
+    ctx.fillStyle = "#000";
+    ctx.fillRect(12, 108, W - 24, 86);
+    // 纸面（暖灰色，模拟旧纸）
+    ctx.fillStyle = "#3a3530";
+    ctx.fillRect(14, 110, W - 28, 82);
+    // 纸面顶部高光
+    ctx.fillStyle = "#4a4540";
+    ctx.fillRect(14, 110, W - 28, 1);
+
     // 左侧黑色色块
     ctx.fillStyle = "#0a0a0a";
-    ctx.fillRect(14, 110, 5, 84);
+    ctx.fillRect(18, 114, 4, 74);
 
-    // 歌名（大号粗体）
-    ctx.fillStyle = "#0a0a0a";
+    // 歌名（大号粗体，浅色文字）
+    ctx.fillStyle = "#e8dcc8";
     ctx.textBaseline = "alphabetic";
     ctx.textAlign = "left";
     const name = state.hasTape
-      ? truncText(ctx, state.name, 250, "700 17px ui-monospace, 'Courier New', monospace")
+      ? truncText(ctx, state.name, 240, "700 16px ui-monospace, 'Courier New', monospace")
       : "—— NO TAPE ——";
-    ctx.font = "700 17px ui-monospace, 'Courier New', monospace";
-    ctx.fillText(name, 28, 132);
+    ctx.font = "700 16px ui-monospace, 'Courier New', monospace";
+    ctx.fillText(name, 30, 132);
 
-    // 艺术家（中号）
-    ctx.fillStyle = "#555";
+    // 艺术家
+    ctx.fillStyle = "#9a8a6a";
     ctx.font = "11px ui-monospace, 'Courier New', monospace";
     const artist = state.hasTape
-      ? truncText(ctx, state.artist.toUpperCase(), 250, "11px ui-monospace, 'Courier New', monospace")
+      ? truncText(ctx, state.artist.toUpperCase(), 240, "11px ui-monospace, 'Courier New', monospace")
       : "INSERT A CASSETTE TO PLAY";
-    ctx.fillText(artist, 28, 150);
+    ctx.fillText(artist, 30, 150);
 
-    // 专辑（小号灰）
+    // 专辑
     if (state.hasTape && state.album) {
-      ctx.fillStyle = "#999";
+      ctx.fillStyle = "#7a6a4a";
       ctx.font = "9px ui-monospace, 'Courier New', monospace";
       ctx.fillText(
-        truncText(ctx, state.album, 250, "9px ui-monospace, 'Courier New', monospace"),
-        28,
+        truncText(ctx, state.album, 240, "9px ui-monospace, 'Courier New', monospace"),
+        30,
         165
       );
     }
 
     // 右侧 SIDE A 标记（黑底白字方块）
-    const sx = W - 80;
-    const sy = 120;
-    ctx.fillStyle = "#0a0a0a";
-    ctx.fillRect(sx, sy, 52, 14);
-    ctx.fillStyle = "#fafafa";
+    const sx = W - 82;
+    const sy = 118;
+    ctx.fillStyle = "#000";
+    ctx.fillRect(sx, sy, 54, 16);
+    ctx.fillStyle = "#e8dcc8";
     ctx.font = "700 9px ui-monospace, 'Courier New', monospace";
     ctx.textAlign = "center";
-    ctx.fillText("SIDE A", sx + 26, sy + 10);
+    ctx.fillText("SIDE A", sx + 27, sy + 11);
     ctx.textAlign = "left";
 
     // 下方规格标记
-    ctx.fillStyle = "#999";
+    ctx.fillStyle = "#7a6a4a";
     ctx.font = "8px ui-monospace, 'Courier New', monospace";
-    ctx.fillText("90 MIN · TYPE II CHROME", sx, 186);
+    ctx.fillText("90 MIN · TYPE II", sx, 186);
   }
 
-  // ===== 带卷窗口（黑色凹陷）=====
+  // ===== 带卷窗口（深色凹陷，内阴影叠层）=====
   private drawWindow(ctx: CanvasRenderingContext2D) {
-    // 黑色凹陷窗口
-    ctx.fillStyle = "#0a0a0a";
-    this.roundRect(ctx, 56, 108, W - 112, 132, 1);
-    ctx.fill();
-    // 内边高光（上沿）
-    ctx.strokeStyle = "#2a2a2a";
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(57, 109);
-    ctx.lineTo(W - 57, 109);
-    ctx.stroke();
+    // 窗口外框（深黑）
+    ctx.fillStyle = "#000";
+    ctx.fillRect(54, 106, W - 108, 136);
+    // 窗口内底（深灰）
+    ctx.fillStyle = "#0d0d0f";
+    ctx.fillRect(56, 108, W - 112, 132);
+    // 顶部内阴影线（模拟凹陷）
+    ctx.fillStyle = "#1a1a1e";
+    ctx.fillRect(56, 108, W - 112, 2);
+    // 底部高光线（模拟凹陷反光）
+    ctx.fillStyle = "#2a2a2e";
+    ctx.fillRect(56, 238, W - 112, 2);
   }
 
   private drawEmptyReels(ctx: CanvasRenderingContext2D) {

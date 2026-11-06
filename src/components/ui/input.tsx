@@ -13,9 +13,9 @@ class Input extends React.Component<InputProps> {
         type={type}
         data-slot="input"
         className={cn(
-          "flex h-9 w-full min-w-0 rounded-none border border-black bg-white px-3 py-1 text-base text-black shadow-sm outline-none transition-[color,box-shadow]",
-          "placeholder:text-gray-400",
-          "focus-visible:border-black focus-visible:ring-1 focus-visible:ring-black",
+          "flex h-9 w-full min-w-0 rounded-none border border-black bg-stone-900 px-3 py-1 text-base text-stone-100 outline-none transition-[color,box-shadow]",
+          "placeholder:text-stone-600",
+          "focus-visible:border-amber-500 focus-visible:ring-1 focus-visible:ring-amber-500",
           "disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 md:text-sm",
           className
         )}

@@ -12,19 +12,19 @@ const buttonVariants = cva(
       variant: {
         // 默认：橙红胶木
         default:
-          "bg-black text-white border border-black hover:bg-gray-800 active:translate-y-[1px]",
+          "bg-stone-700 text-stone-100 border border-black hover:bg-stone-600 active:translate-y-[1px]",
         destructive:
-          "bg-gradient-to-b from-red-600 to-red-800 text-red-50 shadow-md hover:from-red-500 hover:to-red-700 active:translate-y-[1px]",
+          "bg-red-800 text-red-50 border border-black hover:bg-red-700 active:translate-y-[1px]",
         // outline：奶油底棕褐边
         outline:
-          "border border-black bg-white text-black hover:bg-gray-100",
+          "border border-black bg-stone-900 text-stone-200 hover:bg-stone-800",
         // secondary：暖棕底
         secondary:
-          "bg-gray-200 text-black border border-black hover:bg-gray-300 active:translate-y-[1px]",
+          "bg-stone-800 text-stone-200 border border-black hover:bg-stone-700 active:translate-y-[1px]",
         // ghost：透明暖色悬停
         ghost:
-          "text-black hover:bg-gray-100 hover:text-black",
-        link: "text-black underline-offset-4 hover:underline",
+          "text-stone-300 hover:bg-stone-800 hover:text-stone-100",
+        link: "text-amber-400 underline-offset-4 hover:underline",
       },
       size: {
         default: "h-9 px-4 py-2 has-[>svg]:px-3",

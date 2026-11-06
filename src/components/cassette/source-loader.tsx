@@ -159,18 +159,18 @@ export class SourceLoader extends React.Component<
               }}
               className={cn(
                 "flex flex-col items-center justify-center gap-2",
-                "border border-black rounded p-6 cursor-pointer",
-                "transition-colors",
+                "p-6 cursor-pointer transition-colors",
                 dragOver
-                  ? "bg-black text-white"
-                  : "bg-white text-black hover:bg-gray-100"
+                  ? "bg-stone-800"
+                  : "bg-stone-900 hover:bg-stone-800"
               )}
+              style={{ border: "1px dashed #555" }}
             >
-              <Upload className="w-7 h-7" />
-              <p className="text-sm font-medium">
+              <Upload className="w-7 h-7 text-stone-400" />
+              <p className="text-sm font-medium text-stone-200">
                 点击或拖拽音频文件到此
               </p>
-              <p className="text-xs text-gray-500">
+              <p className="text-xs text-stone-500">
                 支持 MP3 / WAV / OGG / FLAC / M4A
               </p>
             </div>
@@ -228,25 +228,26 @@ export class SourceLoader extends React.Component<
                       onClick={() => this.handleSelectSearchResult(s.id)}
                       disabled={loading}
                       className={cn(
-                        "flex items-center gap-3 text-left p-2.5 border border-black bg-white",
-                        "hover:bg-gray-100 transition-colors group disabled:opacity-50"
+                        "flex items-center gap-3 text-left p-2.5 transition-colors group disabled:opacity-50",
+                        "bg-stone-900 hover:bg-stone-800"
                       )}
+                      style={{ border: "1px solid #3a3a3a" }}
                     >
-                      <div className="w-8 h-8 bg-black flex items-center justify-center flex-shrink-0">
-                        <Music2 className="w-3.5 h-3.5 text-white" />
+                      <div className="w-8 h-8 bg-stone-700 flex items-center justify-center flex-shrink-0" style={{ border: '1px solid #555' }}>
+                        <Music2 className="w-3.5 h-3.5 text-amber-400" />
                       </div>
                       <div className="min-w-0 flex-1">
-                        <p className="text-sm font-medium text-black truncate">
+                        <p className="text-sm font-medium text-stone-200 truncate">
                           {s.name}
                           {s.fee === 1 ? (
-                            <span className="ml-1.5 text-[9px] text-gray-500 align-middle">VIP</span>
+                            <span className="ml-1.5 text-[9px] text-amber-500 align-middle">VIP</span>
                           ) : null}
                         </p>
-                        <p className="text-[11px] text-gray-500 truncate">
+                        <p className="text-[11px] text-stone-500 truncate">
                           {s.artist} · {s.album}
                         </p>
                       </div>
-                      <Play className="w-3.5 h-3.5 text-gray-400 group-hover:text-black flex-shrink-0" />
+                      <Play className="w-3.5 h-3.5 text-stone-500 group-hover:text-amber-400 flex-shrink-0" />
                     </button>
                   ))}
                 </div>
@@ -285,7 +286,7 @@ export class SourceLoader extends React.Component<
                     )}
                   </Button>
                 </div>
-                <p className="text-[11px] text-gray-500 leading-relaxed mt-1.5">
+                <p className="text-[11px] text-stone-500 leading-relaxed mt-1.5">
                   由于版权保护，VIP 歌曲及部分歌曲无法获取音频，此时建议改用本地上传。
                 </p>
               </div>
@@ -300,26 +301,27 @@ export class SourceLoader extends React.Component<
                   type="button"
                   onClick={() => this.props.onLoad(s, "sample")}
                   className={cn(
-                    "flex items-center gap-3 text-left p-3 border border-black bg-white",
-                    "hover:bg-gray-100 transition-colors group"
+                    "flex items-center gap-3 text-left p-3 transition-colors group",
+                    "bg-stone-900 hover:bg-stone-800"
                   )}
+                  style={{ border: '1px solid #3a3a3a' }}
                 >
-                  <div className="w-9 h-9 bg-black flex items-center justify-center flex-shrink-0">
-                    <Music2 className="w-4 h-4 text-white" />
+                  <div className="w-9 h-9 bg-stone-700 flex items-center justify-center flex-shrink-0" style={{ border: '1px solid #555' }}>
+                    <Music2 className="w-4 h-4 text-amber-400" />
                   </div>
                   <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium text-black truncate">
+                    <p className="text-sm font-medium text-stone-200 truncate">
                       {s.name}
                     </p>
-                    <p className="text-[11px] text-gray-500 truncate">
+                    <p className="text-[11px] text-stone-500 truncate">
                       {s.artist} · {s.album}
                     </p>
                   </div>
-                  <Play className="w-4 h-4 text-gray-400 group-hover:text-black flex-shrink-0" />
+                  <Play className="w-4 h-4 text-stone-500 group-hover:text-amber-400 flex-shrink-0" />
                 </button>
               ))}
             </div>
-            <p className="text-[11px] text-gray-500 mt-2">
+            <p className="text-[11px] text-stone-500 mt-2">
               示例曲目来自 SoundHelix（免版权），用于快速体验功能。
             </p>
           </TabsContent>

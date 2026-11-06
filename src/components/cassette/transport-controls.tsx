@@ -69,21 +69,25 @@ class MechButton extends React.Component<MechButtonProps> {
           "relative flex flex-col items-center justify-center gap-1",
           "w-16 h-16 sm:w-[72px] sm:h-[72px]",
           "select-none touch-none",
-          "transition-all duration-100",
-          "border border-black",
+          "transition-all duration-75",
           active
-            ? "bg-black text-white"
-            : "bg-white text-black hover:bg-gray-100",
+            ? "bg-stone-900 text-amber-400"
+            : "bg-stone-700 text-stone-200 hover:bg-stone-600",
           disabled ? "opacity-30 cursor-not-allowed" : "cursor-pointer",
         ].join(" ")}
         style={{
-          boxShadow: active ? "inset 0 0 0 1px #000" : "none",
+          // 拟物按键：实线边框 + 实线下阴影（无模糊），按下时阴影消失
+          border: "1px solid #000",
+          boxShadow: active
+            ? "inset 0 0 0 1px #444, 0 0 0 1px #000"
+            : "inset 0 1px 0 #888, 0 3px 0 #000, 0 4px 0 #1a1a1a",
+          transform: active ? "translateY(3px)" : "translateY(0)",
         }}
       >
         <Icon
           className={[
             "w-5 h-5 sm:w-6 sm:h-6",
-            active ? "text-white" : "text-black",
+            active ? "text-amber-400" : "text-stone-200",
           ].join(" ")}
           strokeWidth={2}
         />
@@ -91,7 +95,7 @@ class MechButton extends React.Component<MechButtonProps> {
           className={[
             "text-[9px] font-bold tracking-wider",
             "font-mono",
-            active ? "text-white" : "text-black",
+            active ? "text-amber-400" : "text-stone-300",
           ].join(" ")}
         >
           {label}
