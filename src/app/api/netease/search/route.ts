@@ -12,9 +12,7 @@ interface SearchSong {
 }
 
 /**
- * 网易云音乐搜索
- * GET /api/netease/search?keywords=xxx&limit=20
- * 用网易云公开搜索接口（POST form），返回歌曲列表
+ * 网易云搜索（直接调网易云 API）
  */
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
@@ -29,7 +27,6 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    // 网易云搜索接口（GET，公开）
     const params = new URLSearchParams({
       s: keywords,
       type: "1",

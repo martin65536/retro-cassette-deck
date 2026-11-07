@@ -11,11 +11,9 @@ interface NetEaseSong {
 }
 
 /**
- * 解析网易云歌曲：获取详情 + 真实音频 CDN URL
- * 1. song/url/v1 获取真实 URL（优先）
+ * 网易云歌曲解析（直接调网易云 API，MetingAPI 风格路由）
+ * 1. song/url/v1 获取真实 URL
  * 2. outer/url 外链 fallback
- * 不做 HEAD 预验证（HEAD 和 GET 行为可能不一致，会误判）
- * 前端 load 失败会显示错误
  */
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
@@ -68,7 +66,6 @@ export async function GET(request: NextRequest) {
     const artist =
       song.artists?.map((a) => a.name).join(" / ") || "未知艺术家";
 
-    // song/url/v1 返回真实 URL
     if (audioUrl) {
       return NextResponse.json({
         ok: true,
@@ -84,7 +81,7 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    // 回退到 outer/url（不做 HEAD 预验证，让前端尝试）
+    // 回退到 outer/url
     const fallbackUrl = `https://music.163.com/song/media/outer/url?id=${song.id}.mp3`;
     return NextResponse.json({
       ok: true,
