@@ -161,7 +161,7 @@ export function CassetteDeck3D({ onBack }: CassetteDeck3DProps) {
           {onBack ? (
             <button
               onClick={onBack}
-              className="pointer-events-auto flex items-center gap-1.5 px-3 py-2 rounded-full bg-black/50 backdrop-blur-md border border-white/10 text-stone-200 text-xs hover:bg-black/70 transition-colors"
+              className="pointer-events-auto flex items-center gap-1.5 px-3 py-2 rounded-full bg-black/80 border border-white/10 text-stone-200 text-xs hover:bg-black/95 transition-colors"
               aria-label="返回"
             >
               <ChevronLeft className="w-3.5 h-3.5" />
@@ -170,13 +170,13 @@ export function CassetteDeck3D({ onBack }: CassetteDeck3DProps) {
           ) : (
             <Link
               href="/"
-              className="pointer-events-auto flex items-center gap-1.5 px-3 py-2 rounded-full bg-black/50 backdrop-blur-md border border-white/10 text-stone-200 text-xs hover:bg-black/70 transition-colors"
+              className="pointer-events-auto flex items-center gap-1.5 px-3 py-2 rounded-full bg-black/80 border border-white/10 text-stone-200 text-xs hover:bg-black/95 transition-colors"
             >
               <ChevronLeft className="w-3.5 h-3.5" />
               <span className="hidden sm:inline">首页</span>
             </Link>
           )}
-          <div className="px-3 py-2 rounded-full bg-black/50 backdrop-blur-md border border-white/10">
+          <div className="px-3 py-2 rounded-full bg-black/80 border border-white/10">
             <p className="text-[10px] tracking-[0.25em] font-mono text-amber-400/80">
               3D · CASSETTE DECK
             </p>
@@ -184,7 +184,7 @@ export function CassetteDeck3D({ onBack }: CassetteDeck3DProps) {
         </div>
 
         <div className="pointer-events-auto">
-          <p className="hidden sm:block text-[11px] font-mono text-stone-400 px-3 py-2 rounded-full bg-black/40 backdrop-blur-md border border-white/5">
+          <p className="hidden sm:block text-[11px] font-mono text-stone-400 px-3 py-2 rounded-full bg-black/75 border border-white/5">
             双指缩放 · 拖动卡带 · 点按按钮
           </p>
         </div>
@@ -193,7 +193,7 @@ export function CassetteDeck3D({ onBack }: CassetteDeck3DProps) {
       {/* 当前曲目信息（左下） */}
       {track && (
         <div className="absolute bottom-4 left-4 pointer-events-none max-w-[60vw]">
-          <div className="px-3.5 py-2.5 rounded-xl bg-black/55 backdrop-blur-md border border-white/10">
+          <div className="px-3.5 py-2.5 rounded-xl bg-black/85 border border-white/10">
             <p className="text-[10px] font-mono text-amber-400/70 tracking-wider mb-0.5">
               NOW PLAYING
             </p>
@@ -226,7 +226,7 @@ export function CassetteDeck3D({ onBack }: CassetteDeck3DProps) {
           onClick={() => setShowLoader((v) => !v)}
           size="sm"
           variant="secondary"
-          className="rounded-full bg-black/55 backdrop-blur-md border border-white/10 text-stone-200 hover:bg-black/70"
+          className="rounded-full bg-black/85 border border-white/10 text-stone-200 hover:bg-black/95"
         >
           <Music2 className="w-3.5 h-3.5 mr-1.5" />
           {track ? "换一首" : "装带"}
@@ -236,7 +236,7 @@ export function CassetteDeck3D({ onBack }: CassetteDeck3DProps) {
       {/* 歌曲装载器面板 */}
       {showLoader && (
         <div className="absolute bottom-16 right-4 pointer-events-auto w-[90vw] max-w-sm">
-          <div className="rounded-2xl bg-black/65 backdrop-blur-md border border-white/10 p-4">
+          <div className="rounded-2xl bg-black/90 border border-white/10 p-4">
             <div className="flex items-center justify-between mb-3">
               <p className="text-xs font-medium text-stone-200">装入磁带</p>
               <button
