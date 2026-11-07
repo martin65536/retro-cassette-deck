@@ -10,7 +10,7 @@ const CassetteDeck3DCanvas = dynamic(
   {
     ssr: false,
     loading: () => (
-      <div className="absolute inset-0 flex items-center justify-center bg-[#0e0e12]">
+      <div className="absolute inset-0 flex items-center justify-center bg-[#1c1c22]">
         <div className="text-stone-500 text-xs font-mono tracking-widest animate-pulse">
           LOADING 3D SCENE…
         </div>
@@ -33,7 +33,7 @@ export function CassetteDeck3D({ onBack }: CassetteDeck3DProps) {
   const [showHelp, setShowHelp] = useState(true);
 
   return (
-    <div className="fixed inset-0 z-50 bg-[#0e0e12]" style={{ touchAction: "none" }}>
+    <div className="fixed inset-0 z-50 bg-[#1c1c22]" style={{ touchAction: "none" }}>
       {/* 3D 画布 */}
       <CassetteDeck3DCanvas />
 

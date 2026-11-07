@@ -1,15 +1,13 @@
 "use client";
 
-import { useRef, useState, useMemo, useCallback, type JSX } from "react";
+import { useRef, useState, useMemo, useCallback, Component, Suspense, type JSX, type ReactNode } from "react";
 import { Canvas, useFrame, useThree, type ThreeEvent } from "@react-three/fiber";
 import {
   OrbitControls,
-  Environment,
   ContactShadows,
   RoundedBox,
   Text,
   PerspectiveCamera,
-  AdaptiveDpr,
 } from "@react-three/drei";
 import * as THREE from "three";
 import { clamp, lerp } from "@/lib/utils";
@@ -20,7 +18,8 @@ import { clamp, lerp } from "@/lib/utils";
  * - 点按按钮：REW / PLAY / STOP / FF / EJECT
  * - EJECT 打开卡带盒盖 + 弹出卡带；拖动卡带装配 / 卸载
  * - 播放时带卷旋转，FF/REW 加速
- * 光影：暖色主光 + 冷色 rim + 接触阴影 + 环境反射，柔和不张扬
+ * 光影：暖色主光 + 冷色 rim + 接触阴影 + 半球光，柔和不张扬
+ * （不使用远程 HDR preset，避免网络加载导致卡 loading）
  * ============================================================ */
 
 type Direction = "forward" | "rewind" | "stop";
@@ -197,9 +196,9 @@ function Deck({ loaded, playing, direction, lidOpen, onButton, reelAngleRef }: D
   const bodyMat = useMemo(
     () =>
       new THREE.MeshStandardMaterial({
-        color: "#2a2a2e",
-        roughness: 0.4,
-        metalness: 0.75,
+        color: "#4a4a52",
+        roughness: 0.55,
+        metalness: 0.45,
       }),
     []
   );
@@ -749,11 +748,12 @@ function Scene({
         rotateSpeed={0.7}
       />
 
-      {/* 灯光：暖色主光 + 冷色 rim + 柔和填充 */}
-      <ambientLight intensity={0.32} color="#fff4e0" />
+      {/* 灯光：暖色主光 + 冷色 rim + 充足环境/半球光（替代 HDR 反射） */}
+      <ambientLight intensity={0.7} color="#fff4e0" />
+      <hemisphereLight args={["#eef2ff", "#2a2018", 0.6]} />
       <directionalLight
         position={[4, 6, 3]}
-        intensity={1.1}
+        intensity={1.4}
         color="#ffe8c8"
         castShadow
         shadow-mapSize={[2048, 2048]}
@@ -769,13 +769,14 @@ function Scene({
         position={[-3, 4, -4]}
         angle={0.5}
         penumbra={0.8}
-        intensity={1.6}
+        intensity={1.5}
         color="#8aaaff"
         castShadow={false}
       />
-      <pointLight position={[0, 2, 4]} intensity={0.3} color="#ffd0a0" distance={12} />
-
-      <Environment preset="studio" environmentIntensity={0.45} />
+      {/* 前面板补光：照亮按钮区，避免阴影淹没细节 */}
+      <pointLight position={[0, 0.5, 5]} intensity={0.9} color="#ffd0a0" distance={14} />
+      <pointLight position={[0, 3, 2]} intensity={0.5} color="#ffffff" distance={12} />
+      <pointLight position={[-3, 1, 3]} intensity={0.4} color="#ffe0c0" distance={10} />
 
       {/* 地面接触阴影 */}
       <ContactShadows
@@ -812,10 +813,42 @@ function Scene({
         onLoad={handleLoad}
         onEject={handleEject}
       />
-
-      <AdaptiveDpr pixelated />
     </>
   );
+}
+
+/* ============================================================
+ * 错误边界：3D 渲染出错时显示提示，而非卡在 loading
+ * ============================================================ */
+class Scene3DErrorBoundary extends Component<
+  { children: ReactNode; onError?: (msg: string) => void },
+  { error: string | null }
+> {
+  state = { error: null as string | null };
+  static getDerivedStateFromError(e: unknown) {
+    return { error: e instanceof Error ? e.message : String(e) };
+  }
+  componentDidCatch(e: unknown) {
+    this.props.onError?.(e instanceof Error ? e.message : String(e));
+  }
+  render() {
+    if (this.state.error) {
+      return (
+        <mesh position={[0, 0.5, 0]}>
+          <Text
+            fontSize={0.12}
+            color="#ff6a6a"
+            anchorX="center"
+            anchorY="middle"
+            maxWidth={4}
+          >
+            {`3D 场景错误\n${this.state.error}`}
+          </Text>
+        </mesh>
+      );
+    }
+    return this.props.children;
+  }
 }
 
 /* ============================================================
@@ -834,24 +867,28 @@ export default function CassetteDeck3DCanvas() {
       dpr={[1, 2]}
       gl={{
         antialias: true,
-        toneMapping: THREE.ACESFilmicToneMapping,
-        toneMappingExposure: 1.05,
+        // 不用 ACESFilmic（会压暗高光），直接线性输出，色彩更亮更通透
+        toneMapping: THREE.NoToneMapping,
       }}
       style={{ width: "100%", height: "100%", touchAction: "none" }}
     >
-      <color attach="background" args={["#0e0e12"]} />
-      <fog attach="fog" args={["#0e0e12", 8, 18]} />
-      <Scene
-        loaded={loaded}
-        setLoaded={setLoaded}
-        playing={playing}
-        setPlaying={setPlaying}
-        direction={direction}
-        setDirection={setDirection}
-        lidOpen={lidOpen}
-        setLidOpen={setLidOpen}
-        songName={songName}
-      />
+      <color attach="background" args={["#1c1c22"]} />
+      <fog attach="fog" args={["#1c1c22", 10, 22]} />
+      <Suspense fallback={null}>
+        <Scene3DErrorBoundary>
+          <Scene
+            loaded={loaded}
+            setLoaded={setLoaded}
+            playing={playing}
+            setPlaying={setPlaying}
+            direction={direction}
+            setDirection={setDirection}
+            lidOpen={lidOpen}
+            setLidOpen={setLidOpen}
+            songName={songName}
+          />
+        </Scene3DErrorBoundary>
+      </Suspense>
     </Canvas>
   );
 }
