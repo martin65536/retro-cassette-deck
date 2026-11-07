@@ -239,9 +239,13 @@ export class SourceLoader extends React.Component<
                       <div className="min-w-0 flex-1">
                         <p className="text-sm font-medium text-stone-200 truncate">
                           {s.name}
-                          {s.fee === 1 ? (
+                          {s.fee === 0 ? (
+                            <span className="ml-1.5 text-[9px] text-green-500 align-middle">免费</span>
+                          ) : s.fee === 1 ? (
                             <span className="ml-1.5 text-[9px] text-amber-500 align-middle">VIP</span>
-                          ) : null}
+                          ) : (
+                            <span className="ml-1.5 text-[9px] text-stone-500 align-middle">试听</span>
+                          )}
                         </p>
                         <p className="text-[11px] text-stone-500 truncate">
                           {s.artist} · {s.album}
