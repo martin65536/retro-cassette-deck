@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, useMemo, useCallback, Component, Suspense, type JSX, type ReactNode } from "react";
+import { useRef, useState, useMemo, useCallback, useEffect, Component, Suspense, type JSX, type ReactNode } from "react";
 import { Canvas, useFrame, useThree, type ThreeEvent } from "@react-three/fiber";
 import {
   OrbitControls,
@@ -11,6 +11,7 @@ import {
 } from "@react-three/drei";
 import * as THREE from "three";
 import { clamp, lerp } from "@/lib/utils";
+import { TapeAudioEngine } from "@/lib/audio-engine";
 
 /* ============================================================
  * 3D 复古磁带机 —— 全屏场景
@@ -649,9 +650,42 @@ function DraggableCassette({
 }
 
 /* ============================================================
- * 主场景
+ * Hook: trackUrl 变化时加载音频到引擎
+ * ============================================================ */
+function useEffectAudioLoad(
+  audioEngine: React.MutableRefObject<TapeAudioEngine | null>,
+  trackUrl: string | null,
+  setLoaded: (v: boolean) => void,
+  durRef: React.MutableRefObject<number>
+) {
+  useEffect(() => {
+    const eng = audioEngine.current;
+    if (!eng || !trackUrl) return;
+    let cancelled = false;
+    setLoaded(false);
+    eng.load(trackUrl)
+      .then(() => {
+        if (cancelled) return;
+        durRef.current = eng.duration;
+        // 加载完成自动装入卡带
+        setLoaded(true);
+      })
+      .catch(() => {
+        /* onError 已由引擎回调处理 */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [audioEngine, trackUrl, setLoaded, durRef]);
+}
+
+/* ============================================================
+ * 主场景 —— 接入真实 TapeAudioEngine
  * ============================================================ */
 function Scene({
+  audioEngine,
+  trackUrl,
+  songName,
   loaded,
   setLoaded,
   playing,
@@ -660,8 +694,11 @@ function Scene({
   setDirection,
   lidOpen,
   setLidOpen,
-  songName,
+  onEnded,
 }: {
+  audioEngine: React.MutableRefObject<TapeAudioEngine | null>;
+  trackUrl: string | null;
+  songName: string;
   loaded: boolean;
   setLoaded: (v: boolean) => void;
   playing: boolean;
@@ -670,65 +707,132 @@ function Scene({
   setDirection: (d: Direction) => void;
   lidOpen: boolean;
   setLidOpen: (v: boolean) => void;
-  songName: string;
+  onEnded: () => void;
 }) {
   const reelAngleRef = useRef(0);
   const rateRef = useRef(0);
+  const audioDurRef = useRef(0);
 
-  // 带卷角速度：playing=正常, forward/rewind=快速
+  // 带卷角速度 + 同步音频 playhead；FF/REW 时驱动音频倍速
   useFrame((_, dt) => {
+    const eng = audioEngine.current;
+    // 推进音频时间估算
+    if (eng) eng.tick(dt);
+
     let target = 0;
-    if (playing) target = 1.5;
-    if (direction === "forward") target = 9;
-    else if (direction === "rewind") target = -9;
-    rateRef.current = lerp(rateRef.current, target, 0.08);
+    if (direction === "forward") target = 8;
+    else if (direction === "rewind") target = -8;
+    else if (playing) target = 1.4;
+    rateRef.current = lerp(rateRef.current, target, 0.1);
     reelAngleRef.current += rateRef.current * dt;
+
+    // FF/REW 时实时驱动音频倍速 + seek
+    if (eng && direction !== "stop") {
+      const rate = Math.abs(rateRef.current);
+      eng.setRate(Math.max(0.5, rate));
+      eng.setReverse(direction === "rewind");
+      if (!eng.isPlaying) eng.play();
+      // 边界处理
+      const t = eng.currentTime;
+      const d = audioDurRef.current;
+      if (direction === "rewind" && t <= 0.05) {
+        eng.seek(0);
+        setDirection("stop");
+        eng.pause();
+        onEnded();
+      } else if (direction === "forward" && d > 0 && t >= d - 0.05) {
+        eng.seek(d);
+        setDirection("stop");
+        eng.pause();
+        onEnded();
+      }
+    } else if (eng && playing) {
+      eng.setReverse(false);
+      eng.setRate(1);
+      if (!eng.isPlaying) eng.play();
+    }
   });
 
-  const onButton = useCallback(
-    (btn: "rew" | "play" | "stop" | "ff" | "eject") => {
-      if (btn === "play") {
-        if (!loaded) return;
-        setPlaying(!playing);
-        setDirection("stop");
-      } else if (btn === "stop") {
+  const onButton = (btn: "rew" | "play" | "stop" | "ff" | "eject") => {
+    const eng = audioEngine.current;
+    if (btn === "play") {
+      if (!loaded || !eng) return;
+      eng.resume();
+      if (playing) {
+        eng.pause();
         setPlaying(false);
-        setDirection("stop");
-      } else if (btn === "ff") {
-        if (!loaded) return;
-        setPlaying(false);
-        setDirection(direction === "forward" ? "stop" : "forward");
-      } else if (btn === "rew") {
-        if (!loaded) return;
-        setPlaying(false);
-        setDirection(direction === "rewind" ? "stop" : "rewind");
-      } else if (btn === "eject") {
-        if (loaded) {
-          // 弹出：开盖 + 卸载
-          setLidOpen(true);
-          setLoaded(false);
-          setPlaying(false);
-          setDirection("stop");
-        } else if (lidOpen) {
-          // 已弹出，关盖
-          setLidOpen(false);
-        }
+      } else {
+        eng.setReverse(false);
+        eng.setRate(1);
+        eng.play();
+        setPlaying(true);
       }
-    },
-    [loaded, playing, direction, lidOpen, setLoaded, setPlaying, setDirection, setLidOpen]
-  );
+      setDirection("stop");
+    } else if (btn === "stop") {
+      if (eng) {
+        eng.pause();
+        eng.setRate(1);
+        eng.setReverse(false);
+      }
+      setPlaying(false);
+      setDirection("stop");
+    } else if (btn === "ff") {
+      if (!loaded || !eng) return;
+      const newDir = direction === "forward" ? "stop" : "forward";
+      setDirection(newDir);
+      setPlaying(false);
+      if (newDir === "stop") {
+        eng.setRate(1);
+        eng.setReverse(false);
+        eng.pause();
+      }
+    } else if (btn === "rew") {
+      if (!loaded || !eng) return;
+      const newDir = direction === "rewind" ? "stop" : "rewind";
+      setDirection(newDir);
+      setPlaying(false);
+      if (newDir === "stop") {
+        eng.setRate(1);
+        eng.setReverse(false);
+        eng.pause();
+      }
+    } else if (btn === "eject") {
+      if (loaded) {
+        if (eng) {
+          eng.pause();
+          eng.setRate(1);
+          eng.setReverse(false);
+        }
+        setLidOpen(true);
+        setLoaded(false);
+        setPlaying(false);
+        setDirection("stop");
+      } else if (lidOpen) {
+        setLidOpen(false);
+      }
+    }
+  };
 
-  const handleLoad = useCallback(() => {
+  const handleLoad = () => {
     setLoaded(true);
     setLidOpen(false);
-  }, [setLoaded, setLidOpen]);
+  };
 
-  const handleEject = useCallback(() => {
+  const handleEject = () => {
+    const eng = audioEngine.current;
+    if (eng) {
+      eng.pause();
+      eng.setRate(1);
+      eng.setReverse(false);
+    }
     setLidOpen(true);
     setLoaded(false);
     setPlaying(false);
     setDirection("stop");
-  }, [setLidOpen, setLoaded, setPlaying, setDirection]);
+  };
+
+  // 当 trackUrl 变化且有引擎时，加载音频并更新 duration
+  useEffectAudioLoad(audioEngine, trackUrl, setLoaded, audioDurRef);
 
   return (
     <>
@@ -853,14 +957,38 @@ class Scene3DErrorBoundary extends Component<
 
 /* ============================================================
  * 默认导出：Canvas 容器
+ * 状态由父组件持有（loaded/playing/direction/lidOpen + trackUrl/songName），
+ * 这里的 Scene 接入真实 TapeAudioEngine。
  * ============================================================ */
-export default function CassetteDeck3DCanvas() {
-  const [loaded, setLoaded] = useState(false);
-  const [playing, setPlaying] = useState(false);
-  const [direction, setDirection] = useState<Direction>("stop");
-  const [lidOpen, setLidOpen] = useState(false);
-  const [songName] = useState("Summer Tape · Side A");
+export interface CassetteDeck3DCanvasProps {
+  audioEngine: React.MutableRefObject<TapeAudioEngine | null>;
+  trackUrl: string | null;
+  songName: string;
+  loaded: boolean;
+  setLoaded: (v: boolean) => void;
+  playing: boolean;
+  setPlaying: (v: boolean) => void;
+  direction: Direction;
+  setDirection: (d: Direction) => void;
+  lidOpen: boolean;
+  setLidOpen: (v: boolean) => void;
+  onEnded: () => void;
+}
 
+export default function CassetteDeck3DCanvas({
+  audioEngine,
+  trackUrl,
+  songName,
+  loaded,
+  setLoaded,
+  playing,
+  setPlaying,
+  direction,
+  setDirection,
+  lidOpen,
+  setLidOpen,
+  onEnded,
+}: CassetteDeck3DCanvasProps) {
   return (
     <Canvas
       shadows
@@ -877,6 +1005,9 @@ export default function CassetteDeck3DCanvas() {
       <Suspense fallback={null}>
         <Scene3DErrorBoundary>
           <Scene
+            audioEngine={audioEngine}
+            trackUrl={trackUrl}
+            songName={songName}
             loaded={loaded}
             setLoaded={setLoaded}
             playing={playing}
@@ -885,7 +1016,7 @@ export default function CassetteDeck3DCanvas() {
             setDirection={setDirection}
             lidOpen={lidOpen}
             setLidOpen={setLidOpen}
-            songName={songName}
+            onEnded={onEnded}
           />
         </Scene3DErrorBoundary>
       </Suspense>

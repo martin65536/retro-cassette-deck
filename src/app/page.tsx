@@ -1,16 +1,11 @@
-"use client";
-
-import { useState } from "react";
 import { CassettePlayer } from "@/components/cassette/cassette-player";
-import { CassetteDeck3D } from "@/components/cassette3d";
-import { Box, RotateCcw } from "lucide-react";
+import { Box } from "lucide-react";
+import Link from "next/link";
 
 export default function Home() {
-  const [view, setView] = useState<"2d" | "3d">("2d");
-
   return (
     <div
-      className={`min-h-screen flex flex-col text-stone-200 ${view === "3d" ? "overflow-hidden" : ""}`}
+      className="min-h-screen flex flex-col text-stone-200"
       style={{
         overscrollBehavior: "none",
         touchAction: "pan-y",
@@ -20,11 +15,6 @@ export default function Home() {
           "repeating-linear-gradient(0deg, rgba(255,255,255,0.015) 0 1px, transparent 1px 3px)",
       }}
     >
-      {/* 3D 全屏视图（叠加层，覆盖一切） */}
-      {view === "3d" && <CassetteDeck3D onBack={() => setView("2d")} />}
-
-      {/* 2D 视图：3D 模式下隐藏避免透出 */}
-      <div className={view === "3d" ? "hidden" : "contents"}>
       {/* Header：金属铭牌风格 */}
       <header
         className="px-6 pt-10 sm:pt-14 pb-6"
@@ -51,30 +41,22 @@ export default function Home() {
               </p>
             </div>
 
-            {/* 2D / 3D 视图切换 */}
-            <button
-              onClick={() => setView(view === "2d" ? "3d" : "2d")}
+            {/* 进入 3D 页面 */}
+            <Link
+              href="/3d"
               className="flex items-center gap-2 px-3.5 py-2.5 flex-shrink-0 transition-colors group"
               style={{
                 border: "2px solid #000",
                 boxShadow: "0 0 0 1px #3a3a3e, 0 3px 0 #000",
-                backgroundColor: view === "3d" ? "#e8a050" : "#2a2a2e",
+                backgroundColor: "#2a2a2e",
               }}
-              aria-label={view === "2d" ? "切换到 3D 视图" : "返回 2D 视图"}
+              aria-label="进入 3D 磁带机页面"
             >
-              {view === "2d" ? (
-                <Box className="w-4 h-4 text-amber-400" />
-              ) : (
-                <RotateCcw className="w-4 h-4 text-stone-900" />
-              )}
-              <span
-                className={`text-xs font-mono tracking-wider ${
-                  view === "3d" ? "text-stone-900" : "text-stone-300"
-                }`}
-              >
-                {view === "2d" ? "3D" : "2D"}
+              <Box className="w-4 h-4 text-amber-400" />
+              <span className="text-xs font-mono tracking-wider text-stone-300 group-hover:text-amber-400">
+                3D
               </span>
-            </button>
+            </Link>
           </div>
         </div>
       </header>
@@ -97,7 +79,6 @@ export default function Home() {
           <p className="font-mono">带卷可拖拽 · 实时倒放 · 采样模式无限倍速</p>
         </div>
       </footer>
-      </div>{/* 2D 视图包裹结束 */}
     </div>
   );
 }
