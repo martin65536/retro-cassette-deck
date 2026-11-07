@@ -119,11 +119,6 @@ export class TapeAudioEngine {
         }
         throw new Error(detail);
       }
-      // 检查是否为音频（上游可能返回 HTML 404 页面）
-      const ct = res.headers.get("content-type") || "";
-      if (ct.includes("text/html")) {
-        throw new Error("该歌曲因版权保护无法获取音频，请尝试本地上传或示例曲目");
-      }
       const arr = await res.arrayBuffer();
       this.buffer = await this.ctx!.decodeAudioData(arr);
       this.cachedDuration = this.buffer.duration;

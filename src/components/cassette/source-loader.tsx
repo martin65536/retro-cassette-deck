@@ -291,7 +291,7 @@ export class SourceLoader extends React.Component<
                   </Button>
                 </div>
                 <p className="text-[11px] text-stone-500 leading-relaxed mt-1.5">
-                  由于版权保护，VIP 歌曲及部分歌曲无法获取音频，此时建议改用本地上传。
+                  输入网易云歌曲 ID 或分享链接。
                 </p>
               </div>
             </div>
@@ -326,7 +326,7 @@ export class SourceLoader extends React.Component<
               ))}
             </div>
             <p className="text-[11px] text-stone-500 mt-2">
-              示例曲目来自 SoundHelix（免版权），用于快速体验功能。
+              示例曲目来自 SoundHelix，用于快速体验功能。
             </p>
           </TabsContent>
         </Tabs>
