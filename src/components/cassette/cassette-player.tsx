@@ -657,11 +657,8 @@ export class CassettePlayer extends React.Component<Record<string, never>, Playe
     this.drawCanvas();
     this.setState({ loading: true });
     try {
-      await this.audio.load(newTrack.url);
-    } catch (e) {
-      this.setState({
-        error: `音频加载失败：${e instanceof Error ? e.message : "未知错误"}`,
-      });
+      const errMsg = `音频加载失败：${e instanceof Error ? e.message : "未知错误"}`;
+      this.setState({ error: errMsg });
     } finally {
       this.setState({ loading: false });
     }

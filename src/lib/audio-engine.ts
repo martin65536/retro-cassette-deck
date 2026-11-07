@@ -99,7 +99,6 @@ export class TapeAudioEngine {
    */
   async load(url: string): Promise<void> {
     this.ensureCtx();
-    await this.ensureWorklet();
     this.stopNode();
     this.buffer = null;
     this.playhead = 0;
@@ -108,6 +107,7 @@ export class TapeAudioEngine {
     this.cachedDuration = 0;
 
     try {
+      await this.ensureWorklet();
       const res = await fetch(url);
       if (!res.ok) {
         let detail = `HTTP ${res.status}`;
