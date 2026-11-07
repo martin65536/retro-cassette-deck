@@ -83,14 +83,14 @@ function Cassette({
   return (
     <group position={position} rotation={rotation}>
       {/* 上壳 */}
-      <RoundedBox args={[1.3, 0.16, 0.85]} radius={0.025} smoothness={4} castShadow receiveShadow>
+      <RoundedBox args={[1.3, 0.16, 0.85]} radius={0.025} smoothness={2} castShadow receiveShadow>
         <primitive object={shellMat} attach="material" />
       </RoundedBox>
       {/* 下壳（稍低，形成薄缝） */}
       <RoundedBox
         args={[1.3, 0.14, 0.85]}
         radius={0.025}
-        smoothness={4}
+        smoothness={2}
         position={[0, -0.155, 0]}
         castShadow
         receiveShadow
@@ -223,14 +223,14 @@ function Deck({ loaded, playing, direction, lidOpen, onButton, reelAngleRef }: D
   );
   const glassMat = useMemo(
     () =>
-      new THREE.MeshPhysicalMaterial({
+      // 不用 meshPhysicalMaterial/transmission（每帧渲染场景到纹理，极耗 GPU），
+      // 改用标准半透明材质模拟玻璃，视觉接近、开销极低
+      new THREE.MeshStandardMaterial({
         color: "#0a0a0c",
-        metalness: 0.1,
-        roughness: 0.08,
-        transmission: 0.85,
-        thickness: 0.3,
+        metalness: 0.3,
+        roughness: 0.15,
         transparent: true,
-        opacity: 0.55,
+        opacity: 0.45,
       }),
     []
   );
@@ -258,7 +258,7 @@ function Deck({ loaded, playing, direction, lidOpen, onButton, reelAngleRef }: D
       <RoundedBox
         args={[3.4, 0.95, 2.3]}
         radius={0.05}
-        smoothness={5}
+        smoothness={2}
         castShadow
         receiveShadow
       >
@@ -269,7 +269,7 @@ function Deck({ loaded, playing, direction, lidOpen, onButton, reelAngleRef }: D
       <RoundedBox
         args={[3.3, 0.04, 2.2]}
         radius={0.03}
-        smoothness={4}
+        smoothness={2}
         position={[0, 0.48, 0]}
         receiveShadow
       >
@@ -492,7 +492,7 @@ function DeckButton({
         }}
         castShadow
       >
-        <RoundedBox args={[0.32, 0.16, 0.1]} radius={0.02} smoothness={3}>
+        <RoundedBox args={[0.32, 0.16, 0.1]} radius={0.02} smoothness={2}>
           <meshStandardMaterial
             color={active ? activeColor : "#4a4a4e"}
             metalness={0.7}
@@ -860,14 +860,14 @@ function Scene({
         intensity={1.4}
         color="#ffe8c8"
         castShadow
-        shadow-mapSize={[2048, 2048]}
+        shadow-mapSize={[1024, 1024]}
         shadow-bias={-0.0005}
-        shadow-camera-left={-4}
-        shadow-camera-right={4}
-        shadow-camera-top={4}
-        shadow-camera-bottom={-4}
+        shadow-camera-left={-3}
+        shadow-camera-right={3}
+        shadow-camera-top={3}
+        shadow-camera-bottom={-3}
         shadow-camera-near={0.5}
-        shadow-camera-far={20}
+        shadow-camera-far={15}
       />
       <spotLight
         position={[-3, 4, -4]}
@@ -882,14 +882,15 @@ function Scene({
       <pointLight position={[0, 3, 2]} intensity={0.5} color="#ffffff" distance={12} />
       <pointLight position={[-3, 1, 3]} intensity={0.4} color="#ffe0c0" distance={10} />
 
-      {/* 地面接触阴影 */}
+      {/* 地面接触阴影 —— 静态渲染一次（frames=1），降低分辨率省 GPU */}
       <ContactShadows
         position={[0, -0.5, 0]}
-        opacity={0.55}
-        scale={10}
-        blur={2.2}
-        far={4}
-        resolution={1024}
+        opacity={0.5}
+        scale={8}
+        blur={2.5}
+        far={3}
+        resolution={512}
+        frames={1}
         color="#000000"
       />
 
@@ -992,11 +993,13 @@ export default function CassetteDeck3DCanvas({
   return (
     <Canvas
       shadows
-      dpr={[1, 2]}
+      dpr={[1, 1.5]}
       gl={{
         antialias: true,
         // 不用 ACESFilmic（会压暗高光），直接线性输出，色彩更亮更通透
         toneMapping: THREE.NoToneMapping,
+        // 限制功率偏好，移动端省电
+        powerPreference: "high-performance",
       }}
       style={{ width: "100%", height: "100%", touchAction: "none" }}
     >
