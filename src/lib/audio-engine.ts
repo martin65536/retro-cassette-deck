@@ -149,8 +149,13 @@ export class TapeAudioEngine {
         const msg = e.data;
         if (msg.type === "ended") {
           this.playing = false;
-          this.playhead = 0;
           this.smoothedRate = 1;
+          // 停在当前边界（结尾或开头），不跳到另一头。
+          // worklet 自身已在边界处停下，主线程 playhead 钳制到对应边界，
+          // 由 onEnded 回调读取 audio.currentTime（即边界）。
+          if (this.cachedDuration > 0) {
+            this.playhead = this.reverse ? 0 : this.cachedDuration;
+          }
           this.cb.onEnded?.();
         } else if (msg.type === "playhead") {
           this.playhead = msg.time;
