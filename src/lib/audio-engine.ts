@@ -10,7 +10,7 @@ import { getWorkletUrl, revokeWorkletUrl } from "./tape-worklet-code";
  * - AudioWorkletNode（新）：采样模式，逐样本手动读取，rate 无上限（100x/1000x 都行）
  *
  * "磁针读取磁带频率"——rate 即磁带移动速度，音高随 rate 连续变化（线性插值平滑）
- * 反向播放：playhead 递减，真实倒放音频
+ * 反向播放：worklet 内 playhead 递减逐采样倒读，不预生成反向 buffer
  */
 
 export interface AudioEngineCallbacks {
@@ -35,6 +35,8 @@ export class TapeAudioEngine {
   private cb: AudioEngineCallbacks;
   private cachedDuration = 0;
   private workletReady = false;
+  // 防止 tick() 与 worklet 'ended' 消息同帧重复触发 onEnded
+  private endedFired = false;
 
   constructor(cb: AudioEngineCallbacks = {}) {
     this.cb = cb;
@@ -76,23 +78,11 @@ export class TapeAudioEngine {
     return this.playhead;
   }
 
-  get duration() {
-    return this.cachedDuration;
-  }
-
   get isPlaying() {
     return this.playing;
   }
 
-  get currentRate() {
-    return this.smoothedRate;
-  }
-
   private smoothedRate = 1;
-
-  get isReverse() {
-    return this.reverse;
-  }
 
   /**
    * 加载音频：fetch + decodeAudioData，然后传给 worklet
@@ -156,7 +146,7 @@ export class TapeAudioEngine {
           if (this.cachedDuration > 0) {
             this.playhead = this.reverse ? 0 : this.cachedDuration;
           }
-          this.cb.onEnded?.();
+          this.fireEnded();
         } else if (msg.type === "playhead") {
           this.playhead = msg.time;
         }
@@ -183,11 +173,20 @@ export class TapeAudioEngine {
     }
     if (offset != null) this.playhead = offset;
     if (!this.workletNode) return;
+    // 新一轮播放，重置 ended 标记
+    this.endedFired = false;
     this.workletNode.port.postMessage({
       type: "play",
       offset: offset != null ? offset * (this.buffer?.sampleRate || 44100) : undefined,
     });
     this.playing = true;
+  }
+
+  /** 触发 onEnded（同帧 tick + worklet 消息只生效一次） */
+  private fireEnded() {
+    if (this.endedFired) return;
+    this.endedFired = true;
+    this.cb.onEnded?.();
   }
 
   private stopNode() {
@@ -249,7 +248,7 @@ export class TapeAudioEngine {
           // 倒放到头：停在 0，不跳到结尾，不继续播开头片段
           this.playhead = 0;
           this.playing = false;
-          this.cb.onEnded?.();
+          this.fireEnded();
         }
       } else {
         this.playhead += dt * rate;
@@ -257,7 +256,7 @@ export class TapeAudioEngine {
           // 正放到尾：停在结尾，不跳回开头
           this.playhead = this.cachedDuration;
           this.playing = false;
-          this.cb.onEnded?.();
+          this.fireEnded();
         }
       }
     }
@@ -265,13 +264,6 @@ export class TapeAudioEngine {
 
   /** seek */
   seek(time: number) {
-    this.playhead = clamp(time, 0, this.cachedDuration > 0 ? this.cachedDuration : 0);
-    if (this.workletNode) {
-      this.workletNode.port.postMessage({ type: "seek", time });
-    }
-  }
-
-  setPlayhead(time: number) {
     this.playhead = clamp(time, 0, this.cachedDuration > 0 ? this.cachedDuration : 0);
     if (this.workletNode) {
       this.workletNode.port.postMessage({ type: "seek", time });

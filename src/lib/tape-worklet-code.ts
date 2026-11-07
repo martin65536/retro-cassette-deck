@@ -101,21 +101,23 @@ class TapeProcessor extends AudioWorkletProcessor {
     // 计算低通滤波器系数
     // effectiveSampleRate=0 时自动：根据 rate 降低截止频率
     // effectiveSampleRate>0 时手动：截止频率 = effectiveSampleRate/2
-    let cutoffFreq;
-    if (this.effectiveSampleRate > 0) {
-      // 手动模式：截止频率 = 有效采样率的一半
-      cutoffFreq = this.effectiveSampleRate * 0.45;
-    } else if (rate <= 1.5) {
-      // 正常播放：不滤波
-      cutoffFreq = sr * 0.45;
-    } else {
-      // 自动模式：截止频率随 rate 降低（二阶衰减更狠）
-      // 真实磁带快进：高频保留约 (sr/2)/rate
-      // 这里用更激进的衰减让高倍速更闷
-      cutoffFreq = Math.max(500, (sr * 0.4) / rate);
+    // 仅在需要滤波时计算（rate>1.5 或手动模式），否则 processSample 不调用
+    let a = 0;
+    const needFilter = rate > 1.5 || this.effectiveSampleRate > 0;
+    if (needFilter) {
+      let cutoffFreq;
+      if (this.effectiveSampleRate > 0) {
+        // 手动模式：截止频率 = 有效采样率的一半
+        cutoffFreq = this.effectiveSampleRate * 0.45;
+      } else {
+        // 自动模式：截止频率随 rate 降低（二阶衰减更狠）
+        // 真实磁带快进：高频保留约 (sr/2)/rate
+        // 这里用更激进的衰减让高倍速更闷
+        cutoffFreq = Math.max(500, (sr * 0.4) / rate);
+      }
+      // 一阶低通系数：a = 1 - exp(-2*PI*fc/sr)
+      a = 1 - Math.exp(-(2 * Math.PI * cutoffFreq) / sr);
     }
-    // 一阶低通系数：a = 1 - exp(-2*PI*fc/sr)
-    const a = 1 - Math.exp(-(2 * Math.PI * cutoffFreq) / sr);
 
     for (let i = 0; i < blockSize; i++) {
       if (this.playhead < 0 || this.playhead >= this.length - 2) {
@@ -137,8 +139,8 @@ class TapeProcessor extends AudioWorkletProcessor {
         const s2 = data[idx + 1] || 0;
         let sample = s1 + (s2 - s1) * frac;
 
-        // 二阶低通滤波
-        if (rate > 1.5 || this.effectiveSampleRate > 0) {
+        // 二阶低通滤波（仅在需要时）
+        if (needFilter) {
           sample = this.processSample(sample, c, a);
         }
 
