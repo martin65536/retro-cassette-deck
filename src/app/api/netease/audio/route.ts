@@ -3,12 +3,12 @@ import { NextRequest, NextResponse } from "next/server";
 export const dynamic = "force-dynamic";
 
 /**
- * 音频流代理（流式转发，无完整缓冲，无严格帧头校验）
+ * 音频流代理（透传上游响应）
  *
  * 接收 ?url=<上游音频URL>，直接 pipe upstream body 到响应
- * - 流式：不完整缓冲，内存占用低，首字节快
- * - 宽松校验：只看 content-type header，非 text/html 即放行
- * - 部分歌曲（fee:8 免费）可正常获取，VIP/版权受限返回 HTML 404 会被拒
+ * - 流式转发（不完整缓冲）
+ * - 透传上游 content-type / status，不拦截 HTML
+ * - 前端 audio-engine.load() 会因 decodeAudioData 失败而报错
  */
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
@@ -38,44 +38,38 @@ export async function GET(request: NextRequest) {
       redirect: "follow",
     });
 
-    if (!upstream.ok) {
-      return NextResponse.json(
-        { ok: false, error: `上游返回 ${upstream.status}` },
-        { status: 502 }
-      );
-    }
-
-    const ct = upstream.headers.get("content-type") || "";
-
-    // 宽松校验：仅拒绝 HTML（版权受限的 404 页面）
-    // 不做帧头字节校验，避免误杀合法音频
-    if (ct.includes("text/html")) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "该歌曲因版权保护无法获取音频，请尝试本地上传或示例曲目",
-        },
-        { status: 403 }
-      );
-    }
-
-    // 流式转发 body（不完整缓冲）
+    // 透传上游 content-type 和 body（包括 HTML 404）
+    const ct = upstream.headers.get("content-type") || "application/octet-stream";
     const headers = new Headers();
-    const audioCt =
-      ct.includes("audio") || ct.includes("octet-stream") || ct.includes("mpeg")
-        ? ct
-        : "audio/mpeg";
-    headers.set("Content-Type", audioCt);
+    headers.set("Content-Type", ct);
     headers.set("Cache-Control", "no-store");
-    // 透传 Content-Length / Accept-Ranges 支持范围请求
     const cl = upstream.headers.get("content-length");
     if (cl) headers.set("Content-Length", cl);
     const ar = upstream.headers.get("accept-ranges");
     if (ar) headers.set("Accept-Ranges", ar);
     headers.set("Access-Control-Allow-Origin", "*");
 
+    // 如果上游返回 HTML（版权 404），改为返回 JSON 错误（前端能解析）
+    if (ct.includes("text/html")) {
+      const body = await upstream.text();
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "该歌曲因版权保护无法获取音频，请尝试本地上传或示例曲目",
+          upstream: {
+            status: upstream.status,
+            contentType: ct,
+            bodyPreview: body.slice(0, 200),
+            url: url,
+          },
+        },
+        { status: 403 }
+      );
+    }
+
+    // 音频流式转发
     return new NextResponse(upstream.body, {
-      status: 200,
+      status: upstream.status,
       headers,
     });
   } catch (err) {
