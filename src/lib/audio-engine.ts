@@ -241,6 +241,7 @@ export class TapeAudioEngine {
       if (this.reverse) {
         this.playhead -= dt * rate;
         if (this.playhead <= 0) {
+          // 倒放到头：停在 0，不跳到结尾，不继续播开头片段
           this.playhead = 0;
           this.playing = false;
           this.cb.onEnded?.();
@@ -248,7 +249,8 @@ export class TapeAudioEngine {
       } else {
         this.playhead += dt * rate;
         if (this.playhead >= this.cachedDuration) {
-          this.playhead = 0;
+          // 正放到尾：停在结尾，不跳回开头
+          this.playhead = this.cachedDuration;
           this.playing = false;
           this.cb.onEnded?.();
         }

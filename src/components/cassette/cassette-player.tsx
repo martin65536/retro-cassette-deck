@@ -53,7 +53,7 @@ interface PlayerState {
   soundsOn: boolean;
   progress: number;
   maxRate: number;      // 可调最高倍速，默认 20
-  inertiaTime: number;  // 惯性时长(秒)，默认 0.8
+  inertiaTime: number;  // 惯性时长(秒)，默认 0.1（0=无惯性，瞬时响应）
   effectiveSampleRate: number;  // 有效采样率 0=自动, >0=手动Hz
 }
 
@@ -70,7 +70,7 @@ const INITIAL_STATE: PlayerState = {
   soundsOn: true,
   progress: 0,
   maxRate: 20,
-  inertiaTime: 0.8,
+  inertiaTime: 0.1,
   effectiveSampleRate: 0,
 };
 
@@ -120,6 +120,9 @@ export class CassettePlayer extends React.Component<Record<string, never>, Playe
     direction: "none" as "forward" | "backward" | "none",
     omega: 0,
     lastRotateTime: 0,
+    // 拖拽倍速平滑：从 0 缓升至目标倍速，避免一上手就顶满
+    // 目标时间常数：持续 1 秒 3 圈/秒的转动才能达到 maxRate
+    smoothedRate: 0,
   };
 
   // 快进/快退倍速过渡：当前倍速（含惯性缓启动/缓减速）
@@ -179,14 +182,18 @@ export class CassettePlayer extends React.Component<Record<string, never>, Playe
 
   // ===== 音频引擎回调 =====
   private handleAudioEnded() {
+    const wasWinding = this.winding;
     this.setState({ playing: false, winding: null });
     this.winding = null;
-    this.updateUI(0, 1);
+    this.windRate = 1;
+    this.windTarget = 1;
+    // 停在当前位置（结尾或开头），不跳到另一头
+    this.updateUI(this.audio.currentTime, 0);
     if (this.soundsOn) {
       const eng = this.ensureSounds();
       if (eng) {
         eng.setHiss(false);
-        eng.brake();
+        if (wasWinding) eng.brake();
       }
     }
   }
@@ -256,6 +263,10 @@ export class CassettePlayer extends React.Component<Record<string, never>, Playe
 
       if (ds.active && eng && this.hasTape) {
         const sinceRotate = now - ds.lastRotateTime;
+        // 拖拽倍速平滑时间常数：约 0.4s（3τ≈1.2s 到 95%），
+        // 即需要持续 1 秒以上的快速转动（约 3 圈/秒）才能顶到 maxRate
+        const DRAG_SMOOTH_TAU = 0.4;
+        const dragK = Math.min(1, dt / DRAG_SMOOTH_TAU);
         if (ds.direction === "forward") {
           eng.setReverse(false);
           let omega = ds.omega;
@@ -263,11 +274,14 @@ export class CassettePlayer extends React.Component<Record<string, never>, Playe
             omega = omega * Math.max(0, 1 - (sinceRotate - 120) / 400);
           }
           // 增益 8 倍，让快速拖拽能到 maxRate 倍速
-          const rate = clamp(
+          const targetRate = clamp(
             (Math.abs(omega) / NORMAL_OMEGA) * 8,
             0.0625,
             this.state.maxRate
           );
+          // 平滑过渡到目标倍速（缓升），停转时平滑回落
+          ds.smoothedRate += (targetRate - ds.smoothedRate) * dragK;
+          const rate = clamp(ds.smoothedRate, 0.0625, this.state.maxRate);
           eng.setRate(rate);
           this.updateUI(eng.currentTime, rate);
           if (!eng.isPlaying) eng.play();
@@ -277,10 +291,12 @@ export class CassettePlayer extends React.Component<Record<string, never>, Playe
           if (sinceRotate > 120) {
             rewindSpeed *= Math.max(0, 1 - (sinceRotate - 120) / 400);
           }
-          rewindSpeed = clamp(rewindSpeed, 0.0625, this.state.maxRate);
-          eng.setRate(rewindSpeed);
+          const targetRate = clamp(rewindSpeed, 0.0625, this.state.maxRate);
+          ds.smoothedRate += (targetRate - ds.smoothedRate) * dragK;
+          const rate = clamp(ds.smoothedRate, 0.0625, this.state.maxRate);
+          eng.setRate(rate);
           if (!eng.isPlaying) eng.play();
-          this.updateUI(eng.currentTime, -rewindSpeed);
+          this.updateUI(eng.currentTime, -rate);
         } else {
           eng.setRate(0.0625);
           this.updateUI(eng.currentTime, 0.0625);
@@ -307,13 +323,19 @@ export class CassettePlayer extends React.Component<Record<string, never>, Playe
         if (this.winding && eng && this.hasTape) {
           // 快进/快退中：按 windRate 设置音频倍速（含方向）
           const dir = this.winding === "forward" ? 1 : -1;
-          eng.setReverse(this.winding === "rewind");
-          eng.setRate(Math.max(0.0625, Math.abs(this.windRate)));
-          if (!eng.isPlaying) eng.play();
-          this.updateUI(eng.currentTime, dir * Math.abs(this.windRate));
-          // 快退到头自动停
-          if (this.winding === "rewind" && eng.currentTime <= 0.05) {
+          // 到边界则停止 winding，不恢复播放（停在边界）
+          const t = eng.currentTime;
+          const dur = this.durationVal;
+          if (
+            (this.winding === "rewind" && t <= 0.05) ||
+            (this.winding === "forward" && dur > 0 && t >= dur - 0.05)
+          ) {
             this.stopWinding();
+          } else {
+            eng.setReverse(this.winding === "rewind");
+            eng.setRate(Math.max(0.0625, Math.abs(this.windRate)));
+            if (!eng.isPlaying) eng.play();
+            this.updateUI(eng.currentTime, dir * Math.abs(this.windRate));
           }
         } else if (this.playing && eng) {
           // 非 winding（含松手后缓减速）：windRate 缓动到 1，保持播放
@@ -503,15 +525,26 @@ export class CassettePlayer extends React.Component<Record<string, never>, Playe
   private stopWinding = () => {
     if (!this.winding) return;
     const wasForward = this.winding === "forward";
+    const t = this.audio.currentTime;
+    const dur = this.durationVal;
+    // 已到边界（快退到头 / 快进到尾）：停在边界，不恢复播放
+    const atStart = t <= 0.05;
+    const atEnd = dur > 0 && t >= dur - 0.05;
     // 缓减速：windTarget 设为 1，windRate 会缓动回 1（不停止播放）
     this.windTarget = 1;
     this.setState({ winding: null });
     this.winding = null;
     // 音频继续播放，只是倍速从 maxRate 缓降到 1
     this.audio.setReverse(false);
-    // 快进松手：保持播放状态
-    // 快退松手：恢复到快退前的播放状态（如果之前在播放）
-    if (wasForward) {
+    if (atStart || atEnd) {
+      // 到边界：停止播放，停在边界
+      this.audio.pause();
+      this.setState({ playing: false });
+      this.playing = false;
+      this.windRate = 1;
+      this.updateUI(t, 0);
+    } else if (wasForward) {
+      // 快进松手：保持播放状态
       this.setState({ playing: true });
       this.playing = true;
     } else {
@@ -564,6 +597,7 @@ export class CassettePlayer extends React.Component<Record<string, never>, Playe
     this.dragState.wasPlaying = this.playing;
     this.dragState.direction = "none";
     this.dragState.omega = 0;
+    this.dragState.smoothedRate = 0;
     this.dragState.lastRotateTime = performance.now();
     this.ensureRAF();
     if (this.soundsOn) {
@@ -577,6 +611,7 @@ export class CassettePlayer extends React.Component<Record<string, never>, Playe
     const wasPlaying = this.dragState.wasPlaying;
     this.dragState.active = false;
     this.dragState.direction = "none";
+    this.dragState.smoothedRate = 0;
     // 恢复正放模式
     this.audio.setReverse(false);
     this.audio.setRate(1);
@@ -913,7 +948,7 @@ export class CassettePlayer extends React.Component<Record<string, never>, Playe
               <span className="text-[10px] font-mono text-stone-400 w-12 flex-shrink-0">惯性</span>
               <TapeSlider
                 value={this.state.inertiaTime}
-                min={0.1}
+                min={0}
                 max={3}
                 step={0.1}
                 onChange={(v) => this.setState({ inertiaTime: v })}

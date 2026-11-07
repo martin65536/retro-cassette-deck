@@ -119,7 +119,9 @@ class TapeProcessor extends AudioWorkletProcessor {
 
     for (let i = 0; i < blockSize; i++) {
       if (this.playhead < 0 || this.playhead >= this.length - 2) {
-        this.playhead = 0;
+        // 到达边界：停在边界处，不跳到另一头，停止播放
+        if (this.playhead < 0) this.playhead = 0;
+        else if (this.playhead >= this.length - 2) this.playhead = this.length - 2;
         this.playing = false;
         this.port.postMessage({ type: 'ended' });
         for (let c = 0; c < numCh; c++) output[c].fill(0, i);
